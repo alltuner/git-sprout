@@ -197,6 +197,24 @@ fn populate(git: &Git, destination: &Path, before: &[source::Worktree], stats: &
         }
     };
 
+    let Ok(destination_index) = git.capture_line(
+        Some(destination),
+        ["rev-parse", "--path-format=absolute", "--git-path", "index"],
+    ) else {
+        stats.fall_back("could not locate the new worktree's index");
+        return;
+    };
+    let destination_index = PathBuf::from(destination_index);
+    let version = scratch_index::default_version(
+        std::env::var("GIT_INDEX_VERSION").ok().as_deref(),
+        git.config(destination, "index.version").as_deref(),
+        git.config(destination, "feature.manyFiles").as_deref() == Some("true"),
+    );
+    if version != scratch_index::SUPPORTED_VERSION {
+        stats.fall_back(format!("the repository writes index version {version}"));
+        return;
+    }
+
     let Some(source) = source::choose(git, before, destination, &head) else {
         stats.fall_back("no usable source checkout");
         return;
@@ -291,14 +309,7 @@ fn populate(git: &Git, destination: &Path, before: &[source::Worktree], stats: &
         return;
     }
 
-    let Ok(destination_index) = git.capture_line(
-        Some(destination),
-        ["rev-parse", "--path-format=absolute", "--git-path", "index"],
-    ) else {
-        stats.fall_back("could not locate the new worktree's index");
-        return;
-    };
-    if scratch_index::write(Path::new(&destination_index), object_hash, &records).is_err() {
+    if scratch_index::write(&destination_index, object_hash, &records).is_err() {
         stats.fall_back("could not write the scratch index");
     }
 }
