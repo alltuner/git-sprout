@@ -605,6 +605,10 @@ fn set_mode(_path: &Path, _mode: u32) {}
 /// back. Nothing else in the process creates files while this runs.
 #[cfg(unix)]
 fn umask() -> u32 {
+    // `mode_t` is 16 bits on macOS and 32 on Linux, so the widening is a real
+    // conversion on one target and a no-op on the other. Neither target should
+    // have to spell the type out.
+    #[allow(clippy::useless_conversion)]
     // SAFETY: single-threaded at this point, so no other file creation can see the gap.
     unsafe {
         let previous = libc::umask(0);
@@ -634,10 +638,13 @@ mod tests {
 
     #[test]
     fn applies_every_dash_c_in_order() {
-        let globals = ["-C", "/repo", "-c", "x=y", "-C", "sub"]
+        // The first -C is spelled as this platform spells an absolute path, so the
+        // test asserts the ordering rather than the separator.
+        let root = if cfg!(windows) { "C:\\repo" } else { "/repo" };
+        let globals = ["-C", root, "-c", "x=y", "-C", "sub"]
             .iter()
             .map(OsString::from)
             .collect::<Vec<_>>();
-        assert_eq!(working_directory(&globals), PathBuf::from("/repo/sub"));
+        assert_eq!(working_directory(&globals), PathBuf::from(root).join("sub"));
     }
 }
