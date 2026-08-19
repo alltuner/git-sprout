@@ -87,7 +87,30 @@ differently named shared index files. A byte-or-name comparison of the admin dir
 reports a difference that is not one; the harness parses the shared index and compares
 its entries instead.
 
-## 7. `--orphan`'s destination is created before the branch check
+## 7. stderr carries git's progress meter, and the spec's "byte for byte" cannot mean it
+
+§3.2 and §8 require stdout and stderr to match byte for byte. On a large tree they
+cannot, as written. `git worktree add` emits its checkout progress on stderr **even
+when stderr is a pipe**:
+
+```
+Updating files:  8% (8107/95056)\rUpdating files:  9% (8556/95056)\r…100% (95056/95056), done.
+```
+
+The percentages are whatever the scheduler allowed, so two runs of *real git against
+real git* differ. Measured on the kernel fixture: that single line was the only
+difference between two control runs.
+
+The harness compares stderr as a terminal would render it - the last
+carriage-return-separated frame of each line - which keeps
+`Updating files: 100% (95056/95056), done.` and drops the intermediate frames. That
+still catches a checkout that touched a different number of paths, which is the part
+an implementation could get wrong.
+
+The spec should say that progress frames are exempt and the final frame is not, since
+"stderr byte for byte" otherwise reads as a requirement no implementation can meet.
+
+## 8. `--orphan`'s destination is created before the branch check
 
 Observed, not a disagreement: for the `--orphan` cases the failure text and the state
 left on disk differ between a repository that has commits and one that does not. Both

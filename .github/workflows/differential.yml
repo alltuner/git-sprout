@@ -45,6 +45,11 @@ jobs:
           fi
 
       - name: Differential suite
+        # Windows runners spawn processes slowly enough that the full cross product
+        # is not worth its wall clock on every commit; the flag matrix itself is
+        # repository-independent and is covered in full on the other two platforms.
+        env:
+          SPROUT_FLAG_MATRIX: ${{ runner.os == 'Windows' && 'core' || 'full' }}
         run: cargo test --release --manifest-path $MANIFEST -- --nocapture
         shell: bash
 

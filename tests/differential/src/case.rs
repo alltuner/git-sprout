@@ -237,9 +237,15 @@ fn case_threads() -> usize {
         .unwrap_or(4)
 }
 
-/// Every flag case, for the per-fixture tests.
+/// The flag cases the per-fixture tests run. The whole matrix by default;
+/// `SPROUT_FLAG_MATRIX=core` narrows it to the short list, for platforms where
+/// process spawning is slow enough that the full cross product is not worth its
+/// wall clock on every commit.
 pub fn all_cases() -> Vec<&'static FlagCase> {
-    crate::flags::ALL.iter().collect()
+    match std::env::var("SPROUT_FLAG_MATRIX").as_deref() {
+        Ok("core") => core_cases(),
+        _ => crate::flags::ALL.iter().collect(),
+    }
 }
 
 /// The short flag matrix, for fixtures where the full one only repeats what the

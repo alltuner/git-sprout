@@ -46,15 +46,27 @@ impl Normaliser {
         String::from_utf8_lossy(&self.bytes(input)).into_owned()
     }
 
-    /// stderr with any `sprout-stats:` line removed. Statistics are an instrument of
-    /// the harness, not part of the output under test.
+    /// stderr as a terminal would render it, minus the harness's own instrument.
+    ///
+    /// Two adjustments, both of which drop something that is not part of the output:
+    /// any `sprout-stats:` line, which the harness asked for; and the intermediate
+    /// frames of git's progress meter, which are separated by carriage returns and
+    /// land at whatever percentages the scheduler happened to allow. The final frame
+    /// is kept, so `Updating files: 100% (95056/95056), done.` is still compared and
+    /// a checkout that touched a different number of paths is still a difference.
     pub fn stderr(&self, input: &[u8]) -> String {
         self.text(input)
             .lines()
             .filter(|line| !line.starts_with(STDERR_PREFIX))
-            .map(|line| format!("{line}\n"))
+            .map(|line| format!("{}\n", last_frame(line)))
             .collect()
     }
+}
+
+/// The last carriage-return-separated frame of a line: what a terminal would still
+/// be showing once the line is finished.
+fn last_frame(line: &str) -> &str {
+    line.rsplit('\r').next().unwrap_or(line)
 }
 
 /// A reflog line is `<old> <new> <ident> <epoch> <tz>\t<message>`. The epoch is

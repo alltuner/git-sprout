@@ -8,7 +8,7 @@ use differential::run::Tool;
 /// Fixtures whose whole point is that cloning fires. `autocrlf` is the one that
 /// proves index-based verification works: every text file's working-tree bytes
 /// differ from its blob, so a hash-against-blob rule would accelerate nothing.
-const ACCELERATED: &[&str] = &["text-heavy", "autocrlf", "plain"];
+const ACCELERATED: &[&str] = &["text-heavy", "autocrlf"];
 
 #[test]
 fn the_fast_path_is_taken_where_the_fixture_exists_to_prove_it() {

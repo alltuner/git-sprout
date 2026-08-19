@@ -13,6 +13,9 @@ root, seed = sys.argv[1], int(sys.argv[2])
 rng = random.Random(seed)
 
 names = ["alpha", "beta", "gamma", "delta", "epsilon", "zeta", "a file", "ünï", "🌱"]
+
+# One always-tracked file, so the commit below never has an empty tree to record.
+open(os.path.join(root, "manifest.txt"), "w").write("seed %d\n" % seed)
 extensions = [".txt", ".bin", ".c", ".md", ""]
 
 directories = [""]
@@ -67,8 +70,8 @@ python3 - "$REPO" "$SEED" <<'GEN'
 import os, random, sys
 root, seed = sys.argv[1], int(sys.argv[2])
 rng = random.Random(seed + 1)
-if rng.random() < 0.7:
-    open(os.path.join(root, "second.txt"), "w").write("second commit\n")
+# Always a change, so the second commit exists and HEAD~1 resolves for every seed.
+open(os.path.join(root, "second.txt"), "w").write("second commit %d\n" % rng.randrange(1000))
 GEN
 commit "generated second"
 

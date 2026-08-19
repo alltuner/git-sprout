@@ -115,7 +115,7 @@ pub fn parse(data: &[u8], oid_len: usize) -> IndexFacts {
     }
 
     while pos + 8 <= body_end {
-        let signature = String::from_utf8_lossy(&data[pos..pos + 4]).into_owned();
+        let signature = printable(&data[pos..pos + 4]);
         let size = be32(&data[pos + 4..pos + 8]);
         let start = pos + 8;
         let end = match start.checked_add(size as usize) {
@@ -256,6 +256,22 @@ fn be32(b: &[u8]) -> u32 {
 
 fn be16(b: &[u8]) -> u16 {
     u16::from_be_bytes([b[0], b[1]])
+}
+
+/// A four-byte extension signature as text. Corrupt indexes are a normal input
+/// here - the injection suite writes them deliberately - so the bytes are escaped
+/// rather than pasted into the report as whatever they happen to be.
+fn printable(bytes: &[u8]) -> String {
+    bytes
+        .iter()
+        .map(|b| {
+            if b.is_ascii_graphic() {
+                (*b as char).to_string()
+            } else {
+                format!("\\x{b:02x}")
+            }
+        })
+        .collect()
 }
 
 pub fn hex(bytes: &[u8]) -> String {

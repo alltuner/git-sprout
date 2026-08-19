@@ -68,12 +68,16 @@ fn every_injection_is_detected() {
                         injection.name()
                     ));
                 }
-                let first = &result.differences[0];
+                let reported = result
+                    .differences
+                    .iter()
+                    .find(|d| d.area == expected)
+                    .unwrap_or(&result.differences[0]);
                 table.push(format!(
-                    "  {:<30} {:<20} {}",
+                    "  {:<30} {:<24} {}",
                     injection.name(),
-                    first.area,
-                    truncate(&first.detail, 96)
+                    reported.area,
+                    truncate(&reported.detail, 92)
                 ));
             }
         }
