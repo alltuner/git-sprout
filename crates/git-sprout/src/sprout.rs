@@ -53,13 +53,13 @@ pub fn add(command: &AddCommand, stats: &mut Stats) -> ExitCode {
     // best effort and step 7 must run whatever happens. A panic in the clone phase would
     // otherwise leave a half-populated worktree behind.
     if let Some(destination) = destination.as_deref() {
-        let quiet = std::panic::take_hook();
+        let reporting = std::panic::take_hook();
         std::panic::set_hook(Box::new(|_| {}));
         let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             populate(&git, destination, &before, stats)
         }));
-        drop(std::panic::take_hook());
-        std::panic::set_hook(quiet);
+        let _ = std::panic::take_hook();
+        std::panic::set_hook(reporting);
         if outcome.is_err() {
             stats.fall_back("the clone phase failed");
         }
