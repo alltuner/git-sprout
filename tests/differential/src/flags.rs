@@ -47,11 +47,19 @@ pub const ALL: &[FlagCase] = &[
     // `-f`, the optional argument OPT_PASSTHRU gives `--track`, and the
     // attached and bundled short forms parse-options accepts.
     case!("detach-short", "wt", ["-d", "../wt", "HEAD"]),
-    case!("no-detach", "wt", ["--no-detach", "../wt", "-b", "nodetach"]),
+    case!(
+        "no-detach",
+        "wt",
+        ["--no-detach", "../wt", "-b", "nodetach"]
+    ),
     case!("no-quiet", "wt", ["--no-quiet", "../wt", "-b", "noquiet"]),
     case!("no-force", "wt", ["--no-force", "../wt", "-b", "noforce"]),
     case!("no-lock", "wt", ["--no-lock", "../wt", "-b", "nolock"]),
-    case!("no-orphan", "wt", ["--no-orphan", "../wt", "-b", "noorphan"]),
+    case!(
+        "no-orphan",
+        "wt",
+        ["--no-orphan", "../wt", "-b", "noorphan"]
+    ),
     case!(
         "no-relative-paths",
         "wt",
@@ -60,15 +68,27 @@ pub const ALL: &[FlagCase] = &[
     case!("force-twice", "wt", ["-ff", "../wt", "-b", "forcetwice"]),
     case!("branch-attached", "wt", ["-battached", "../wt"]),
     case!("bundled-shorts", "wt", ["-fq", "../wt", "-b", "bundled"]),
-    case!("track-direct", "wt", ["--track=direct", "../wt", "-b", "trackdirect"]),
+    case!(
+        "track-direct",
+        "wt",
+        ["--track=direct", "../wt", "-b", "trackdirect"]
+    ),
     case!(
         "track-inherit",
         "wt",
         ["--track=inherit", "../wt", "-b", "trackinherit"]
     ),
-    case!("reason-attached", "wt", ["--lock", "--reason=held", "../wt", "-b", "reasoneq"]),
+    case!(
+        "reason-attached",
+        "wt",
+        ["--lock", "--reason=held", "../wt", "-b", "reasoneq"]
+    ),
     case!("double-dash", "wt", ["-b", "afterdashdash", "--", "../wt"]),
-    case!("last-negation-wins", "wt", ["--detach", "--no-detach", "../wt", "-b", "lastwins"]),
+    case!(
+        "last-negation-wins",
+        "wt",
+        ["--detach", "--no-detach", "../wt", "-b", "lastwins"]
+    ),
     case!("new-branch", "wt", ["../wt", "-b", "feature"]),
     case!("new-branch-first", "wt", ["-b", "ordered", "../wt"]),
     case!("reset-branch", "wt", ["../wt", "-B", "existing"]),
