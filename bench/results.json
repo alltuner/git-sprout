@@ -1,6 +1,22 @@
 {
+  "quality": {
+    "unsettled_sides": [
+      "kernel.sprout",
+      "same-commit.git",
+      "same-commit.sprout"
+    ],
+    "unstable_sides": [
+      "same-commit.git",
+      "same-commit.sprout",
+      "cross-commit.git",
+      "cross-commit.sprout",
+      "no-match.git",
+      "no-match.sprout"
+    ],
+    "trustworthy": false
+  },
   "schema_version": 1,
-  "generated_at": "2026-08-19T12:19:59+00:00",
+  "generated_at": "2026-08-19T13:39:31+00:00",
   "provisional": true,
   "baseline_only": true,
   "differential_verified": false,
@@ -66,54 +82,55 @@
           "cwd": "/Users/dpoblador/.cache/git-sprout-bench/linux",
           "runs": 5,
           "time_s": {
-            "median": 11.1302,
-            "min": 10.402,
-            "max": 16.9891,
+            "median": 20.1024,
+            "min": 17.9091,
+            "max": 35.4795,
             "samples": [
-              11.1302,
-              10.402,
-              10.7584,
-              13.2325,
-              16.9891
+              35.4795,
+              20.1024,
+              18.4098,
+              21.122,
+              17.9091
             ]
           },
           "disk_mb": {
-            "median": 1814.1,
-            "min": 1812.65,
-            "max": 1825.15,
+            "median": 1827.04,
+            "min": 1818.12,
+            "max": 1847.18,
             "samples": [
-              1816.11,
-              1814.1,
-              1814.08,
-              1812.65,
-              1825.15
+              1828.25,
+              1821.39,
+              1818.12,
+              1847.18,
+              1827.04
             ]
           },
           "first_status_s": {
-            "median": 0.6275,
-            "min": 0.3981,
-            "max": 0.6838,
+            "median": 0.728,
+            "min": 0.2882,
+            "max": 1.7509,
             "samples": [
-              0.3981,
-              0.6275,
-              0.6279,
-              0.4127,
-              0.6838
+              1.7509,
+              0.728,
+              0.524,
+              0.9609,
+              0.2882
             ]
           },
           "tree_oid": "92b9cabbbefe9b8cee634769676b9b97238cdfc7",
           "dirty_paths": 13,
           "unsettled_runs": 0,
+          "stable": true,
           "load_avg": {
-            "median": 7.41,
-            "min": 6.69,
-            "max": 8.03,
+            "median": 11.54,
+            "min": 10.17,
+            "max": 15.02,
             "samples": [
-              7.57,
-              6.87,
-              8.03,
-              7.41,
-              6.69
+              10.17,
+              10.27,
+              11.54,
+              15.02,
+              11.98
             ]
           }
         },
@@ -130,61 +147,62 @@
           "cwd": "/Users/dpoblador/.cache/git-sprout-bench/linux",
           "runs": 5,
           "time_s": {
-            "median": 12.7946,
-            "min": 11.7466,
-            "max": 13.5702,
+            "median": 19.3939,
+            "min": 14.2109,
+            "max": 24.054,
             "samples": [
-              12.7946,
-              13.5702,
-              11.7466,
-              13.1341,
-              12.7519
+              23.4988,
+              14.2109,
+              17.2586,
+              19.3939,
+              24.054
             ]
           },
           "disk_mb": {
-            "median": 1813.92,
-            "min": 1809.42,
-            "max": 1872.2,
+            "median": 1821.0,
+            "min": 1812.52,
+            "max": 3660.8,
             "samples": [
-              1813.92,
-              1809.42,
-              1817.57,
-              1813.07,
-              1872.2
+              1821.0,
+              1812.52,
+              1818.57,
+              3660.8,
+              2549.54
             ]
           },
           "first_status_s": {
-            "median": 0.3509,
-            "min": 0.2864,
-            "max": 0.4913,
+            "median": 0.9072,
+            "min": 0.4044,
+            "max": 2.6349,
             "samples": [
-              0.2864,
-              0.4913,
-              0.33,
-              0.4467,
-              0.3509
+              0.4044,
+              0.5291,
+              0.9072,
+              2.6349,
+              1.6888
             ]
           },
           "tree_oid": "92b9cabbbefe9b8cee634769676b9b97238cdfc7",
           "dirty_paths": 13,
-          "unsettled_runs": 0,
+          "unsettled_runs": 3,
+          "stable": true,
           "load_avg": {
-            "median": 6.85,
-            "min": 6.24,
-            "max": 7.58,
+            "median": 7.76,
+            "min": 5.9,
+            "max": 9.98,
             "samples": [
-              7.58,
-              7.56,
-              6.85,
-              6.7,
-              6.24
+              9.98,
+              8.63,
+              7.76,
+              7.04,
+              5.9
             ]
           }
         }
       },
       "comparison": {
-        "time_ratio": 0.87,
-        "disk_ratio": 1.0,
+        "time_ratio": 1.037,
+        "disk_ratio": 1.003,
         "tree_oid_match": true,
         "dirty_paths_match": true
       }
@@ -208,7 +226,7 @@
       "fixture": {
         "tracked_files": 2000,
         "logical_bytes": 262144000,
-        "source_commit": "d32e0c4d8b7c283199686cde954d8de9f8f15dd2",
+        "source_commit": "09abcd6d43d1a1fd1648a12ef61ed6f58f628df6",
         "target_commitish": "HEAD",
         "filesystem": "apfs"
       },
@@ -226,54 +244,55 @@
           "cwd": "/Users/dpoblador/.cache/git-sprout-bench/scratch/same-commit/repo",
           "runs": 5,
           "time_s": {
-            "median": 0.4268,
-            "min": 0.3489,
-            "max": 1.1299,
+            "median": 1.1022,
+            "min": 0.3148,
+            "max": 1.3449,
             "samples": [
-              1.1299,
-              0.4268,
-              0.5032,
-              0.3728,
-              0.3489
+              1.1755,
+              1.1022,
+              0.3148,
+              1.3449,
+              0.495
             ]
           },
           "disk_mb": {
-            "median": 252.73,
-            "min": 251.1,
-            "max": 253.83,
+            "median": 251.42,
+            "min": 251.09,
+            "max": 2180.46,
             "samples": [
-              252.1,
-              251.1,
-              253.31,
-              253.83,
-              252.73
+              2180.46,
+              251.42,
+              252.41,
+              251.09,
+              251.29
             ]
           },
           "first_status_s": {
-            "median": 0.6515,
-            "min": 0.0794,
-            "max": 0.8169,
+            "median": 0.6832,
+            "min": 0.0226,
+            "max": 1.3229,
             "samples": [
-              0.396,
-              0.6734,
-              0.8169,
-              0.0794,
-              0.6515
+              0.9399,
+              0.0226,
+              0.6832,
+              0.2224,
+              1.3229
             ]
           },
-          "tree_oid": "d3b11a15dcf2b9499d7305c9665ca7c7bc974cbb",
+          "tree_oid": "77e8b8f18ab1c2b4ab244b949ce93ed5bce55147",
           "dirty_paths": 0,
-          "unsettled_runs": 0,
+          "unsettled_runs": 1,
+          "stable": false,
           "load_avg": {
-            "median": 7.18,
-            "min": 6.54,
-            "max": 8.41,
+            "median": 5.12,
+            "min": 4.83,
+            "max": 6.7,
             "samples": [
-              8.41,
-              7.55,
-              7.18,
-              6.76,
-              6.54
+              5.12,
+              4.83,
+              4.83,
+              6.7,
+              6.17
             ]
           }
         },
@@ -290,61 +309,62 @@
           "cwd": "/Users/dpoblador/.cache/git-sprout-bench/scratch/same-commit/repo",
           "runs": 5,
           "time_s": {
-            "median": 0.3299,
-            "min": 0.3105,
-            "max": 0.6508,
+            "median": 1.1008,
+            "min": 0.3242,
+            "max": 2.3489,
             "samples": [
-              0.4804,
-              0.3204,
-              0.3105,
-              0.6508,
-              0.3299
+              0.5708,
+              2.3489,
+              1.157,
+              1.1008,
+              0.3242
             ]
           },
           "disk_mb": {
-            "median": 251.17,
-            "min": 247.73,
-            "max": 252.74,
+            "median": 251.22,
+            "min": -486.37,
+            "max": 862.5,
             "samples": [
-              252.74,
-              247.73,
-              251.17,
-              251.34,
-              250.57
+              252.92,
+              862.5,
+              -486.37,
+              251.22,
+              251.1
             ]
           },
           "first_status_s": {
-            "median": 0.6735,
-            "min": 0.6576,
-            "max": 1.1661,
+            "median": 0.7395,
+            "min": 0.5337,
+            "max": 1.7671,
             "samples": [
-              0.6576,
-              0.6735,
-              0.6812,
-              1.1661,
-              0.6616
+              1.7671,
+              0.9099,
+              0.7395,
+              0.5337,
+              0.6979
             ]
           },
-          "tree_oid": "d3b11a15dcf2b9499d7305c9665ca7c7bc974cbb",
+          "tree_oid": "77e8b8f18ab1c2b4ab244b949ce93ed5bce55147",
           "dirty_paths": 0,
-          "unsettled_runs": 0,
+          "unsettled_runs": 2,
+          "stable": false,
           "load_avg": {
-            "median": 6.41,
-            "min": 6.27,
-            "max": 7.74,
+            "median": 5.96,
+            "min": 5.5,
+            "max": 6.16,
             "samples": [
-              6.41,
-              6.38,
-              6.27,
-              7.74,
-              7.15
+              6.16,
+              5.5,
+              6.13,
+              5.96,
+              5.72
             ]
           }
         }
       },
       "comparison": {
-        "time_ratio": 1.294,
-        "disk_ratio": 1.006,
+        "time_ratio": 1.001,
+        "disk_ratio": 1.001,
         "tree_oid_match": true,
         "dirty_paths_match": true
       }
@@ -368,7 +388,7 @@
       "fixture": {
         "tracked_files": 3000,
         "logical_bytes": 196608000,
-        "source_commit": "7c5e200bea7ad60e5acec04cb0773f53efae6f7f",
+        "source_commit": "1a2610e0a24258d530a55d423ed5ef4d5c0bb970",
         "target_commitish": "feature",
         "filesystem": "apfs"
       },
@@ -387,54 +407,55 @@
           "cwd": "/Users/dpoblador/.cache/git-sprout-bench/scratch/cross-commit/repo",
           "runs": 5,
           "time_s": {
-            "median": 0.5554,
-            "min": 0.3424,
-            "max": 1.0488,
+            "median": 0.411,
+            "min": 0.3504,
+            "max": 0.9247,
             "samples": [
-              0.7716,
-              1.0488,
-              0.5554,
-              0.4466,
-              0.3424
+              0.9247,
+              0.8817,
+              0.4043,
+              0.411,
+              0.3504
             ]
           },
           "disk_mb": {
-            "median": 190.77,
-            "min": 187.62,
-            "max": 1460.52,
+            "median": 189.16,
+            "min": 184.04,
+            "max": 191.89,
             "samples": [
-              190.75,
-              187.62,
-              190.77,
-              191.01,
-              1460.52
+              184.04,
+              191.89,
+              190.28,
+              189.16,
+              184.07
             ]
           },
           "first_status_s": {
-            "median": 0.4225,
-            "min": 0.1,
-            "max": 0.9182,
+            "median": 0.578,
+            "min": 0.5631,
+            "max": 1.7182,
             "samples": [
-              0.3225,
-              0.9182,
-              0.9175,
-              0.1,
-              0.4225
+              0.931,
+              1.7182,
+              0.578,
+              0.5639,
+              0.5631
             ]
           },
-          "tree_oid": "878ba2f7ba901df68395367285796a2da6444142",
+          "tree_oid": "1bf71eab243194024860d5211c9f2e2854da3c47",
           "dirty_paths": 0,
           "unsettled_runs": 0,
+          "stable": false,
           "load_avg": {
-            "median": 9.16,
-            "min": 8.24,
-            "max": 10.19,
+            "median": 6.24,
+            "min": 5.69,
+            "max": 6.59,
             "samples": [
-              8.24,
-              10.19,
-              9.16,
-              8.59,
-              10.14
+              6.24,
+              6.59,
+              6.38,
+              6.19,
+              5.69
             ]
           }
         },
@@ -452,61 +473,62 @@
           "cwd": "/Users/dpoblador/.cache/git-sprout-bench/scratch/cross-commit/repo",
           "runs": 5,
           "time_s": {
-            "median": 0.3635,
-            "min": 0.3404,
-            "max": 0.3964,
+            "median": 0.4116,
+            "min": 0.369,
+            "max": 1.0802,
             "samples": [
-              0.3524,
-              0.3635,
-              0.3404,
-              0.394,
-              0.3964
+              0.369,
+              0.4116,
+              1.0802,
+              0.4225,
+              0.3899
             ]
           },
           "disk_mb": {
-            "median": 189.27,
-            "min": 186.07,
-            "max": 190.37,
+            "median": 190.25,
+            "min": 189.11,
+            "max": 389.49,
             "samples": [
-              190.33,
-              189.27,
-              190.37,
-              189.0,
-              186.07
+              190.25,
+              191.84,
+              389.49,
+              189.16,
+              189.11
             ]
           },
           "first_status_s": {
-            "median": 0.511,
-            "min": 0.2129,
-            "max": 0.5474,
+            "median": 0.4963,
+            "min": 0.2655,
+            "max": 1.1702,
             "samples": [
-              0.5266,
-              0.511,
-              0.2605,
-              0.2129,
-              0.5474
+              1.0804,
+              0.2927,
+              0.4963,
+              0.2655,
+              1.1702
             ]
           },
-          "tree_oid": "878ba2f7ba901df68395367285796a2da6444142",
+          "tree_oid": "1bf71eab243194024860d5211c9f2e2854da3c47",
           "dirty_paths": 0,
           "unsettled_runs": 0,
+          "stable": false,
           "load_avg": {
-            "median": 8.13,
-            "min": 7.51,
-            "max": 8.96,
+            "median": 5.61,
+            "min": 5.56,
+            "max": 5.84,
             "samples": [
-              8.96,
-              8.41,
-              8.13,
-              7.64,
-              7.51
+              5.56,
+              5.67,
+              5.56,
+              5.84,
+              5.61
             ]
           }
         }
       },
       "comparison": {
-        "time_ratio": 1.528,
-        "disk_ratio": 1.008,
+        "time_ratio": 0.999,
+        "disk_ratio": 0.994,
         "tree_oid_match": true,
         "dirty_paths_match": true
       }
@@ -530,7 +552,7 @@
       "fixture": {
         "tracked_files": 2000,
         "logical_bytes": 262144000,
-        "source_commit": "64cfcb9903efce4b5545619fa7717790106b65ec",
+        "source_commit": "470bc24bbfe29cd19cb70cd6ad7b7c98d23427e5",
         "target_commitish": "rewritten",
         "filesystem": "apfs"
       },
@@ -549,54 +571,55 @@
           "cwd": "/Users/dpoblador/.cache/git-sprout-bench/scratch/no-match/repo",
           "runs": 5,
           "time_s": {
-            "median": 0.3903,
-            "min": 0.3392,
-            "max": 1.1098,
+            "median": 0.3856,
+            "min": 0.327,
+            "max": 0.7085,
             "samples": [
-              0.5665,
-              0.3795,
-              0.3392,
-              1.1098,
-              0.3903
+              0.7085,
+              0.3856,
+              0.327,
+              0.39,
+              0.3599
             ]
           },
           "disk_mb": {
-            "median": 252.39,
-            "min": 250.26,
-            "max": 299.79,
+            "median": 251.14,
+            "min": 250.67,
+            "max": 251.32,
             "samples": [
-              250.26,
-              251.26,
-              252.39,
-              299.79,
-              253.2
+              250.67,
+              251.14,
+              251.32,
+              251.1,
+              251.16
             ]
           },
           "first_status_s": {
-            "median": 0.4858,
-            "min": 0.2317,
-            "max": 0.8383,
+            "median": 0.7081,
+            "min": 0.0286,
+            "max": 0.7227,
             "samples": [
-              0.4858,
-              0.2317,
-              0.6817,
-              0.2836,
-              0.8383
+              0.2609,
+              0.0286,
+              0.7135,
+              0.7227,
+              0.7081
             ]
           },
-          "tree_oid": "b29d6f46eb74aab903640545bb41ed14262d6a1d",
+          "tree_oid": "1dc43ac14ff1750e81691c548b21f62e5b52d85e",
           "dirty_paths": 0,
           "unsettled_runs": 0,
+          "stable": false,
           "load_avg": {
-            "median": 10.74,
-            "min": 9.41,
-            "max": 11.4,
+            "median": 10.57,
+            "min": 9.88,
+            "max": 11.23,
             "samples": [
-              10.89,
-              10.74,
-              11.4,
-              9.7,
-              9.41
+              10.9,
+              11.23,
+              10.57,
+              9.88,
+              9.88
             ]
           }
         },
@@ -614,61 +637,62 @@
           "cwd": "/Users/dpoblador/.cache/git-sprout-bench/scratch/no-match/repo",
           "runs": 5,
           "time_s": {
-            "median": 0.3955,
-            "min": 0.3376,
-            "max": 1.1808,
+            "median": 0.5965,
+            "min": 0.3547,
+            "max": 1.8113,
             "samples": [
-              0.3389,
-              0.3955,
-              1.1808,
-              0.4059,
-              0.3376
+              0.5965,
+              0.3547,
+              0.37,
+              1.3382,
+              1.8113
             ]
           },
           "disk_mb": {
-            "median": 251.51,
-            "min": 245.56,
-            "max": 261.93,
+            "median": 252.58,
+            "min": 251.25,
+            "max": 1904.05,
             "samples": [
-              251.51,
-              261.93,
-              257.52,
-              245.56,
-              250.97
+              251.25,
+              252.58,
+              251.35,
+              1904.05,
+              396.92
             ]
           },
           "first_status_s": {
-            "median": 0.6491,
-            "min": 0.2268,
-            "max": 0.8634,
+            "median": 0.7055,
+            "min": 0.0969,
+            "max": 1.2716,
             "samples": [
-              0.2268,
-              0.7091,
-              0.5809,
-              0.8634,
-              0.6491
+              0.4805,
+              1.2716,
+              0.7055,
+              0.0969,
+              0.9541
             ]
           },
-          "tree_oid": "b29d6f46eb74aab903640545bb41ed14262d6a1d",
+          "tree_oid": "1dc43ac14ff1750e81691c548b21f62e5b52d85e",
           "dirty_paths": 0,
           "unsettled_runs": 0,
+          "stable": false,
           "load_avg": {
-            "median": 8.41,
-            "min": 7.97,
-            "max": 9.05,
+            "median": 9.11,
+            "min": 7.27,
+            "max": 9.58,
             "samples": [
-              9.05,
-              8.49,
-              8.41,
-              8.06,
-              7.97
+              9.58,
+              9.29,
+              9.11,
+              7.27,
+              9.01
             ]
           }
         }
       },
       "comparison": {
-        "time_ratio": 0.987,
-        "disk_ratio": 1.003,
+        "time_ratio": 0.646,
+        "disk_ratio": 0.994,
         "tree_oid_match": true,
         "dirty_paths_match": true
       }
