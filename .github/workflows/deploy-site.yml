@@ -1,0 +1,44 @@
+# ABOUTME: Publishes docs/ to the sprout.alltuner.com Garage bucket.
+# ABOUTME: Runs on a tailnet runner because the S3 endpoint is tailnet-only.
+name: deploy-site
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type "deploy" to publish the site.'
+        required: true
+        default: ''
+
+concurrency:
+  group: deploy-site
+  cancel-in-progress: false
+
+jobs:
+  budget:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check the byte budget
+        run: ./docs/check-budget.sh
+
+  publish:
+    needs: budget
+    # Two gates. The repository variable SITE_PUBLISH must be set to "enabled",
+    # and a manual run must additionally be confirmed by typing "deploy".
+    if: >-
+      vars.SITE_PUBLISH == 'enabled' &&
+      (github.event_name == 'release' || inputs.confirm == 'deploy')
+    # depo.internal.alltuner.com is reachable over Tailscale only, and publishing
+    # through the public endpoint turns small PUTs into 0-byte objects.
+    runs-on: self-hosted
+    environment: sprout-site
+    steps:
+      - uses: actions/checkout@v7
+      - name: Publish docs/ to the bucket
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.SITES_S3_ACCESS_KEY }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.SITES_S3_SECRET_KEY }}
+        run: ./docs/deploy.sh

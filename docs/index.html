@@ -1,0 +1,669 @@
+<!doctype html>
+<!-- ABOUTME: The single-page site for git-sprout, served at sprout.alltuner.com. -->
+<!-- ABOUTME: Self-contained: inline CSS and JS, two self-hosted fonts, no build step. -->
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+
+<title>git-sprout — git worktree add without copying your tree</title>
+<meta name="description" content="Every git worktree is a second full copy of your tree on disk. git-sprout is a drop-in git worktree add that shares disk blocks instead. Same command, same result, a fraction of the space.">
+<link rel="canonical" href="https://sprout.alltuner.com/">
+
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://sprout.alltuner.com/">
+<meta property="og:title" content="git-sprout — git worktree add without copying your tree">
+<meta property="og:description" content="Every git worktree is a second full copy of your tree on disk. On APFS, btrfs and ReFS it does not have to be.">
+<meta property="og:image" content="https://brand.alltuner.com/social/sprout-og-1200x630.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:site_name" content="All Tuner Labs">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="git-sprout — git worktree add without copying your tree">
+<meta name="twitter:description" content="Every git worktree is a second full copy of your tree on disk. On APFS, btrfs and ReFS it does not have to be.">
+<meta name="twitter:image" content="https://brand.alltuner.com/social/sprout-og-1200x630.png">
+
+<meta name="theme-color" content="#f7f4f3" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#2c2826" media="(prefers-color-scheme: dark)">
+
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%235b2333'/%3E%3Crect x='5' y='9' width='22' height='5' rx='1' fill='%23f7f4f3'/%3E%3Crect x='5' y='19' width='4' height='5' rx='1' fill='%23f7f4f3'/%3E%3C/svg%3E" type="image/svg+xml">
+
+<!-- Applies a stored theme choice before first paint, and marks the document as
+     scripted so the reveal transition only hides content that JS will reveal. -->
+<script>(function(){var p=localStorage.getItem("at-theme")||"dark";var t=p==="system"?(matchMedia("(prefers-color-scheme: light)").matches?"light":"dark"):p;var e=document.documentElement;e.setAttribute("data-theme",t);e.setAttribute("data-theme-pref",p);e.className="js"})();</script>
+
+<link rel="preload" href="fonts/figtree.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="fonts/jetbrains-mono.woff2" as="font" type="font/woff2" crossorigin>
+
+<style>
+@font-face{font-family:Figtree;src:url(fonts/figtree.woff2) format("woff2");font-weight:300 900;font-style:normal;font-display:swap}
+@font-face{font-family:"JetBrains Mono";src:url(fonts/jetbrains-mono.woff2) format("woff2");font-weight:400;font-style:normal;font-display:swap}
+
+/* Brand tokens — brand/public/colors/. Wine is the only accent. */
+:root{
+  --wine:#5b2333;--wine-light:#7a2f45;--wine-bright:#d98ba3;
+  --wine-glow:rgba(91,35,51,.2);
+  --white-smoke:#f7f4f3;--taupe-gray:#928e8d;--raisin-black:#2c2826;
+  --font-sans:Figtree,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --font-mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --radius-sm:6px;--radius-md:10px;
+  --container:1100px;--gutter:1.5rem;
+  --ease:cubic-bezier(.2,.8,.2,1);
+}
+:root,:root[data-theme=dark]{
+  --bg:var(--raisin-black);--bg-surface:#36302d;--bg-elevated:#3f3936;
+  --fg:var(--white-smoke);--fg-dim:#d4d3d2;--fg-muted:var(--taupe-gray);
+  --fg-faint:rgba(247,244,243,.12);--nav-bg:#241f1e;
+  --accent:var(--wine-bright);--bar:#5c5551;
+}
+:root[data-theme=light]{
+  --bg:var(--white-smoke);--bg-surface:#fff;--bg-elevated:#efeae8;
+  --fg:var(--raisin-black);--fg-dim:#4a4441;--fg-muted:#6f6a68;
+  --fg-faint:rgba(44,40,38,.14);--nav-bg:#fff;
+  --accent:var(--wine);--bar:#cfc7c3;
+}
+
+*,*::before,*::after{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%;scroll-behavior:smooth}
+body{margin:0;font-family:var(--font-sans);font-size:16px;line-height:1.6;color:var(--fg);background:var(--bg);-webkit-font-smoothing:antialiased}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+h1,h2,h3{letter-spacing:-.02em;line-height:1.15;margin:0 0 .5em;font-weight:700}
+p{margin:0 0 1em}
+code,pre,kbd{font-family:var(--font-mono);font-variant-numeric:tabular-nums}
+code{font-size:.9em;padding:.12em .35em;border-radius:var(--radius-sm);background:var(--bg-elevated)}
+pre{margin:0;font-size:.8rem;line-height:1.7;overflow-x:auto}
+pre code{padding:0;background:none;font-size:1em}
+h1 code,h2 code,h3 code{background:none;padding:0;color:inherit;font-size:.9em}
+svg{display:block;max-width:100%}
+[hidden]{display:none}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:2px}
+
+.container{max-width:var(--container);margin:0 auto;padding:0 var(--gutter)}
+.section{padding:4.5rem 0}
+.divider{height:1px;background:var(--fg-faint);max-width:var(--container);margin:0 auto}
+.eyebrow{font-family:var(--font-mono);font-size:.7rem;text-transform:uppercase;letter-spacing:.15em;color:var(--accent);margin-bottom:.9rem}
+.section-title{font-size:clamp(1.5rem,3.4vw,2.1rem);margin-bottom:.75rem}
+.lead{color:var(--fg-muted);max-width:62ch}
+.note{font-size:.85rem;color:var(--fg-muted);max-width:70ch}
+
+/* Header */
+.site-header{position:sticky;top:0;z-index:50;background:var(--nav-bg);border-bottom:1px solid var(--fg-faint)}
+.site-header__inner{max-width:var(--container);margin:0 auto;padding:.7rem var(--gutter);display:flex;align-items:center;justify-content:space-between;gap:1rem}
+.brand-mark{display:inline-flex;align-items:center;gap:.5rem;white-space:nowrap;font-family:var(--font-mono);font-size:.95rem;color:var(--fg)}
+.brand-mark:hover{text-decoration:none}
+.brand-mark svg{width:1.15rem;height:1.15rem;color:var(--accent)}
+.site-nav{display:flex;align-items:center;gap:1.1rem;list-style:none;margin:0;padding:0}
+.nav-link{display:inline-flex;align-items:center;justify-content:center;min-width:44px;min-height:44px;font-family:var(--font-mono);font-size:.8rem;color:var(--fg-muted)}
+.nav-link:hover{color:var(--fg);text-decoration:none}
+.nav-link svg{width:1rem;height:1rem}
+
+/* Status strip — remove at M4, see the note in the Compatibility section. */
+.status{background:var(--bg-elevated);border-bottom:1px solid var(--fg-faint);font-size:.8rem;color:var(--fg-dim)}
+.status .container{padding-top:.6rem;padding-bottom:.6rem}
+.status b{font-family:var(--font-mono);font-weight:400;color:var(--fg)}
+
+/* Buttons */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:.5rem;padding:.7rem 1.15rem;min-height:44px;border-radius:var(--radius-md);font-family:var(--font-mono);font-size:.85rem;border:1px solid transparent;background:none;cursor:pointer;transition:background 150ms var(--ease),color 150ms var(--ease),border-color 150ms var(--ease)}
+.btn:hover{text-decoration:none}
+.btn svg{width:1rem;height:1rem}
+.btn-primary{background:var(--wine);color:var(--white-smoke);border-color:var(--wine-light)}
+.btn-primary:hover{background:var(--wine-light);color:var(--white-smoke)}
+.btn-ghost{color:var(--fg-dim);border-color:var(--fg-faint)}
+.btn-ghost:hover{background:var(--fg-faint);color:var(--fg)}
+.btn-icon{width:44px;height:44px;padding:0;border:1px solid var(--fg-faint);color:var(--fg-muted);border-radius:var(--radius-sm)}
+.btn-icon:hover{color:var(--fg);background:var(--fg-faint)}
+
+/* Hero */
+.hero{position:relative;padding:2.5rem 0 3rem;overflow:hidden}
+.hero__glow{position:absolute;top:-40%;right:-25%;width:70%;height:120%;border-radius:50%;background:radial-gradient(ellipse,var(--wine-glow) 0,transparent 70%);pointer-events:none}
+.hero__pill{display:inline-flex;align-items:center;gap:.5rem;padding:.3rem .85rem;border-radius:999px;border:1px solid var(--fg-faint);font-family:var(--font-mono);font-size:.72rem;color:var(--fg-muted);margin:0 0 1.25rem}
+.hero__pill code{background:none;padding:0;color:var(--fg-dim)}
+.hero__title{font-size:clamp(2.1rem,6.2vw,4rem);line-height:1.04;letter-spacing:-.03em;margin:0 0 1.1rem}
+.hero__title-accent{color:var(--accent)}
+.hero__lead{font-size:1.05rem;color:var(--fg-muted);max-width:56ch;margin-bottom:1.75rem}
+.hero__actions{display:flex;flex-wrap:wrap;gap:.75rem}
+
+/* Headline stat */
+.stat{display:flex;align-items:baseline;flex-wrap:wrap;gap:.4rem 1.1rem;margin-top:2.25rem}
+.stat__pair{display:flex;flex-direction:column;gap:.15rem}
+.stat__value{font-family:var(--font-mono);font-variant-numeric:tabular-nums;font-size:clamp(1.9rem,7vw,3rem);line-height:1;letter-spacing:-.04em}
+.stat__value--sprout{color:var(--accent)}
+.stat__label{font-family:var(--font-mono);font-size:.72rem;color:var(--fg-muted)}
+.stat__arrow{font-family:var(--font-mono);font-size:clamp(1.4rem,4vw,2rem);color:var(--fg-muted);align-self:center}
+.stat__caption{margin:.9rem 0 0;font-size:.8rem;color:var(--fg-muted)}
+
+/* Bar pair */
+.bars{margin:2.5rem 0 0;padding:0}
+.bars__row+.bars__row{margin-top:1.6rem}
+.bars__head{display:flex;align-items:baseline;justify-content:space-between;gap:1rem;font-family:var(--font-mono);font-size:.8rem;margin-bottom:.5rem}
+.bars__name{color:var(--fg-dim)}
+.bars__figure{font-variant-numeric:tabular-nums;color:var(--fg)}
+.bars__figure--sprout{color:var(--accent)}
+.bars__track{width:100%;height:2.25rem;display:block}
+.bar{fill:var(--bar)}
+.bar--sprout{fill:var(--wine)}
+:root[data-theme=dark] .bar--sprout{fill:var(--wine-light)}
+.bars__scale{margin:.7rem 0 0;font-size:.78rem;color:var(--fg-muted)}
+.chart-anim .bar{transform:scaleX(0);transform-origin:0 0}
+.chart-anim.is-visible .bar{transform:scaleX(1);transition:transform 180ms var(--ease)}
+
+/* Table */
+.table-wrap{margin:3rem 0 0}
+table{width:100%;border-collapse:collapse;font-size:.88rem}
+caption{text-align:left;font-size:.8rem;color:var(--fg-muted);margin-bottom:.75rem}
+th,td{text-align:left;padding:.7rem .6rem;border-bottom:1px solid var(--fg-faint);vertical-align:top}
+thead th{font-family:var(--font-mono);font-size:.72rem;font-weight:400;text-transform:uppercase;letter-spacing:.08em;color:var(--fg-muted)}
+tbody th{font-weight:500;color:var(--fg)}
+td{font-family:var(--font-mono);font-variant-numeric:tabular-nums;color:var(--fg-dim)}
+tr.is-headline th,tr.is-headline td{font-weight:700;color:var(--fg)}
+.col-sprout{color:var(--accent)}
+
+/* Proof block */
+.proof{margin:2.5rem 0 0;padding:1.1rem 1.2rem;background:var(--bg-surface);border:1px solid var(--fg-faint);border-radius:var(--radius-md)}
+.proof__label{font-family:var(--font-mono);font-size:.72rem;color:var(--fg-muted);margin:0 0 .75rem}
+
+/* Steps */
+.steps{margin:2rem 0 0;padding:0;list-style:none;counter-reset:step}
+.steps li{position:relative;padding:0 0 1.4rem 2.6rem;counter-increment:step;max-width:66ch}
+.steps li::before{content:counter(step);position:absolute;left:0;top:.05rem;width:1.7rem;height:1.7rem;display:flex;align-items:center;justify-content:center;border:1px solid var(--fg-faint);border-radius:var(--radius-sm);font-family:var(--font-mono);font-size:.8rem;color:var(--accent)}
+
+/* Lists */
+.checks{margin:2rem 0 0;padding:0;list-style:none}
+.checks li{padding:0 0 .9rem 1.1rem;position:relative;max-width:70ch;color:var(--fg-dim)}
+.checks li::before{content:"";position:absolute;left:0;top:.7rem;width:5px;height:5px;border-radius:50%;background:var(--accent)}
+
+/* Code blocks */
+.block{margin:1.25rem 0 0;padding:1rem 1.1rem;background:var(--bg-surface);border:1px solid var(--fg-faint);border-radius:var(--radius-md)}
+.block__label{font-family:var(--font-mono);font-size:.72rem;color:var(--fg-muted);margin:0 0 .6rem}
+.copy-row{display:flex;align-items:stretch;border:1px solid var(--fg-faint);background:var(--bg-surface);border-radius:var(--radius-md);overflow:hidden;max-width:100%;width:fit-content}
+.copy-row code{background:none;padding:.85rem 1rem;font-size:.9rem;color:var(--fg);user-select:all;white-space:nowrap;overflow-x:auto}
+.copy-row button{min-width:44px;min-height:44px;display:inline-flex;align-items:center;justify-content:center;border:0;border-left:1px solid var(--fg-faint);background:none;color:var(--fg-muted);cursor:pointer}
+.copy-row button:hover{background:var(--fg-faint);color:var(--fg)}
+.copy-row button svg{width:1rem;height:1rem}
+
+/* Footer */
+.site-footer{padding:2.5rem 0 3rem;border-top:1px solid var(--fg-faint);font-size:.85rem;color:var(--fg-muted)}
+.site-footer__row{display:flex;flex-direction:column;align-items:center;gap:1.25rem;text-align:center}
+.site-footer__sub{font-size:.75rem;margin-top:.25rem}
+.site-footer__links{display:flex;flex-wrap:wrap;justify-content:center;gap:1rem}
+.site-footer__links a{font-family:var(--font-mono);font-size:.75rem;color:var(--fg-muted)}
+.site-footer__links a:hover{color:var(--fg)}
+.budget{font-family:var(--font-mono);font-size:.75rem;color:var(--fg-muted);text-align:center;padding:2rem var(--gutter) 0;margin:0}
+
+/* Reveal */
+.js .reveal{opacity:0;transform:translateY(8px)}
+.reveal.is-visible{opacity:1;transform:none;transition:opacity 160ms var(--ease),transform 160ms var(--ease)}
+
+@media (min-width:768px){
+  :root{--gutter:2rem}
+  .section{padding:6rem 0}
+  .hero{padding:5rem 0 4rem}
+  .site-footer__row{flex-direction:row;justify-content:space-between;text-align:left}
+}
+@media (max-width:719px){
+  .table-collapse thead{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+  .table-collapse tr{display:block;padding:.9rem 0;border-bottom:1px solid var(--fg-faint)}
+  .table-collapse th,.table-collapse td{display:block;border:0;padding:0}
+  .table-collapse tbody th{margin-bottom:.5rem}
+  .table-collapse td{display:flex;justify-content:space-between;gap:1rem;padding:.15rem 0}
+  .table-collapse td::before{content:attr(data-label);font-family:var(--font-mono);color:var(--fg-muted);font-weight:400}
+  .table-collapse td span{white-space:nowrap}
+}
+@media (max-width:520px){
+  .nav-link[data-optional]{display:none}
+  .site-nav{gap:.35rem}
+  pre{font-size:.75rem}
+}
+@media (prefers-reduced-motion:reduce){
+  html{scroll-behavior:auto}
+  *,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important}
+  .js .reveal{opacity:1;transform:none}
+  .chart-anim .bar{transform:none}
+}
+</style>
+</head>
+<body>
+
+<header class="site-header">
+  <div class="site-header__inner">
+    <a href="/" class="brand-mark" aria-label="git-sprout home">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><rect x="3" y="7" width="26" height="6" rx="1.5" fill="currentColor" opacity=".45"/><rect x="3" y="19" width="6" height="6" rx="1.5" fill="currentColor"/></svg>
+      git-sprout
+    </a>
+    <ul class="site-nav">
+      <li><a class="nav-link" href="#numbers" data-optional>Numbers</a></li>
+      <li><a class="nav-link" href="#install">Install</a></li>
+      <li><a class="nav-link" href="https://github.com/alltuner/git-sprout" aria-label="GitHub repository">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/></svg>
+      </a></li>
+      <li><button class="btn btn-icon" data-theme-toggle aria-label="Switch theme">
+        <svg data-icon="dark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+        <svg data-icon="light" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" hidden><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+        <svg data-icon="system" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" hidden><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+      </button></li>
+    </ul>
+  </div>
+</header>
+
+<!-- TODO(M4): delete this strip, and swap the Compatibility wording, once the
+     differential suite is green. Until then the page states a contract, not a result. -->
+<div class="status">
+  <div class="container">
+    <b>Under construction.</b> The compatibility contract below is what git-sprout is being built to, not yet a measured result. Every figure on this page is provisional.
+  </div>
+</div>
+
+<main>
+
+<section class="hero">
+  <div class="hero__glow"></div>
+  <div class="container">
+    <p class="hero__pill">Drop-in replacement for <code>git worktree add</code></p>
+
+    <h1 class="hero__title">Stop paying for the same tree <span class="hero__title-accent">twice</span>.</h1>
+
+    <p class="hero__lead">Every worktree you create is a second full copy of your repository on disk. On APFS, btrfs and ReFS it does not have to be — same command, same result, none of the bytes.</p>
+
+    <div class="hero__actions">
+      <a class="btn btn-primary" href="#install">Install</a>
+      <a class="btn btn-ghost" href="https://github.com/alltuner/git-sprout">View source</a>
+    </div>
+
+    <div class="stat">
+      <span class="stat__pair">
+        <span class="stat__value" id="stat-git"><!--bench:kernel.disk.git-->1814 MB<!--/bench--></span>
+        <span class="stat__label">git worktree add</span>
+      </span>
+      <span class="stat__arrow" aria-hidden="true">→</span>
+      <span class="stat__pair">
+        <span class="stat__value stat__value--sprout" id="stat-sprout"><!--bench:kernel.disk.sprout-->44 MB<!--/bench--></span>
+        <span class="stat__label">git sprout add</span>
+      </span>
+    </div>
+    <p class="stat__caption">Disk consumed by one worktree of the Linux kernel: <!--bench:kernel.files-->95 056<!--/bench--> files, <!--bench:kernel.bytes-->2.0 GB<!--/bench-->.</p>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<section id="numbers" class="section">
+  <div class="container">
+    <div class="reveal">
+      <p class="eyebrow">The numbers</p>
+      <h2 class="section-title">Measured, not asserted.</h2>
+      <p class="lead">One worktree, one repository everyone knows. What changes between the two runs is what the filesystem had to allocate.</p>
+    </div>
+
+    <!-- The bars are a figure like any other, so they carry bench markers too. Each
+         marked <rect> is replaced whole. The viewBox is fixed at 0 0 1000 24, so a
+         width is its metric scaled against the larger of the two: the bigger bar is
+         always 1000, the smaller is round(metric / larger * 1000, 2). Emit exactly:
+           chart.bar.git     <rect class="bar" x="0" y="0" width="1000" height="24"/>
+           chart.bar.sprout  <rect class="bar bar--sprout" x="0" y="0" width="24.26" height="24"/>
+         The classes carry the colour and the reveal transform. Keep them. -->
+    <figure class="bars reveal">
+      <div class="bars__row">
+        <div class="bars__head"><span class="bars__name">git worktree add</span><span class="bars__figure"><!--bench:kernel.disk.git-->1814 MB<!--/bench--></span></div>
+        <svg class="bars__track" viewBox="0 0 1000 24" preserveAspectRatio="none" aria-hidden="true"><!--bench:chart.bar.git--><rect class="bar" x="0" y="0" width="1000" height="24"/><!--/bench--></svg>
+      </div>
+      <div class="bars__row">
+        <div class="bars__head"><span class="bars__name">git sprout add</span><span class="bars__figure bars__figure--sprout"><!--bench:kernel.disk.sprout-->44 MB<!--/bench--></span></div>
+        <svg class="bars__track" viewBox="0 0 1000 24" preserveAspectRatio="none" aria-hidden="true"><!--bench:chart.bar.sprout--><rect class="bar bar--sprout" x="0" y="0" width="24.26" height="24"/><!--/bench--></svg>
+      </div>
+      <figcaption class="bars__scale">Same scale, same axis. <!--bench:kernel.disk.ratio-->41x<!--/bench--> less disk. That is <!--bench:kernel.disk.saved-->1.73 GB<!--/bench--> that never gets allocated, every time anyone creates a worktree.</figcaption>
+    </figure>
+
+    <div class="table-wrap reveal">
+      <table class="table-collapse">
+        <caption>Wall clock and disk consumed, per worktree. The kernel row is the one that matters at scale.</caption>
+        <thead>
+          <tr><th scope="col">Workload</th><th scope="col">git worktree add</th><th scope="col">git sprout add</th></tr>
+        </thead>
+        <tbody>
+          <tr class="is-headline">
+            <th scope="row">Linux kernel, <!--bench:kernel.files-->95 056<!--/bench--> files, <!--bench:kernel.bytes-->2.0 GB<!--/bench--></th>
+            <td data-label="git worktree add"><span><!--bench:kernel.time.git-->11.06s<!--/bench--> · <!--bench:kernel.disk.git-->1814 MB<!--/bench--></span></td>
+            <td data-label="git sprout add" class="col-sprout"><span><!--bench:kernel.time.sprout-->11.51s<!--/bench--> · <!--bench:kernel.disk.sprout-->44 MB<!--/bench--></span></td>
+          </tr>
+          <tr>
+            <th scope="row">250 MB, 2000 files</th>
+            <td data-label="git worktree add"><span><!--bench:medium.time.git-->0.85s<!--/bench--> · <!--bench:medium.disk.git-->251 MB<!--/bench--></span></td>
+            <td data-label="git sprout add" class="col-sprout"><span><!--bench:medium.time.sprout-->0.21s<!--/bench--> · <!--bench:medium.disk.sprout-->~0 MB<!--/bench--></span></td>
+          </tr>
+          <tr>
+            <th scope="row">188 MB, 3000 files, source 6 commits behind</th>
+            <td data-label="git worktree add"><span><!--bench:cross.time.git-->0.83s<!--/bench--> · <!--bench:cross.disk.git-->187 MB<!--/bench--></span></td>
+            <td data-label="git sprout add" class="col-sprout"><span><!--bench:cross.time.sprout-->0.15s<!--/bench--> · <!--bench:cross.disk.sprout-->~1.5 MB<!--/bench--></span></td>
+          </tr>
+          <tr>
+            <th scope="row">btrfs, 188 MB</th>
+            <td data-label="git worktree add"><span><!--bench:btrfs.time.git-->0.33s<!--/bench--> · <!--bench:btrfs.disk.git-->187 MB<!--/bench--></span></td>
+            <td data-label="git sprout add" class="col-sprout"><span><!--bench:btrfs.time.sprout-->0.05s<!--/bench--> · <!--bench:btrfs.disk.sprout-->0.1 MB<!--/bench--></span></td>
+          </tr>
+          <tr>
+            <th scope="row">ext4 (no block cloning)</th>
+            <td data-label="git worktree add"><span><!--bench:ext4.time.git-->0.41s<!--/bench--> · <!--bench:ext4.disk.git-->187 MB<!--/bench--></span></td>
+            <td data-label="git sprout add"><span>falls back, identical</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p class="note reveal" style="margin-top:1.75rem">Ten engineers with five worktrees each is <!--bench:fleet.disk.git-->90 GB<!--/bench--> of kernel checkouts on git, and about <!--bench:fleet.disk.sprout-->2 GB<!--/bench--> on sprout.</p>
+
+    <p class="note reveal">About that time column, straight: this is not a speed-up. On a small repo it saves under a second, and on the kernel the two commands finish within half a second of each other. Cloning in parallel is future work. The disk column is the whole reason to install it, at every size, and cost there scales with file count rather than with bytes.</p>
+
+    <div class="proof reveal">
+      <p class="proof__label">The filesystem's own accounting: <code>btrfs filesystem du</code>, verbatim</p>
+<pre><code><!--bench:btrfs.du-->       Total   Exclusive  Set shared  Filename
+   187.00MiB       0.00B   187.00MiB  repo/src        &lt;- source
+   187.00MiB       0.00B   187.00MiB  wt-sprout/src   &lt;- git sprout add
+   187.00MiB   187.00MiB       0.00B  wt-plain/src    &lt;- git worktree add<!--/bench--></code></pre>
+    </div>
+
+    <p class="note reveal" style="margin-top:1.5rem">Provisional figures. The kernel row is measured on the implementation itself, on a dedicated APFS image so nothing else on the machine could contaminate it; the smaller rows are still the research prototype's. Machine: <!--bench:env.macos-->Apple M2, 8 cores, macOS 26.6.1, git 2.55.0<!--/bench-->; Linux figures on <!--bench:env.linux-->kernel 7.0.12, git 2.47.3, loopback btrfs and XFS<!--/bench-->. They are re-measured by the benchmark harness in the repository and replaced here at release; <a href="https://github.com/alltuner/git-sprout/tree/main/bench">the harness and its raw output</a> are in the repo.</p>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<section id="how" class="section">
+  <div class="container">
+    <div class="reveal">
+      <p class="eyebrow">How it works</p>
+      <h2 class="section-title">Copy-on-write, not copy.</h2>
+      <p class="lead">Four steps, and git performs the ones that decide what the worktree contains.</p>
+    </div>
+
+    <ol class="steps reveal">
+      <li>Git creates the worktree, empty.</li>
+      <li>Every file that is identical in a checkout you already have is cloned by the filesystem into a new file that shares the same disk blocks until something writes to it.</li>
+      <li>A file is only cloned when git itself already considers the original unmodified and knows it holds exactly the content the new worktree needs. Anything git is not certain about is left alone.</li>
+      <li>Git checks out the rest and writes the index. <strong>Git decides what the worktree contains; the clone only decides how the bytes got there.</strong></li>
+    </ol>
+
+    <p class="note reveal">The two files share disk blocks until one of them changes. Editing either leaves the other untouched, and only the changed blocks start costing space.</p>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<section id="compatibility" class="section">
+  <div class="container">
+    <div class="reveal">
+      <p class="eyebrow">Compatibility</p>
+      <h2 class="section-title">Indistinguishable from git, and specific about where it is not.</h2>
+      <!-- TODO(M4): when the differential suite is green, this paragraph becomes the
+           verified claim ("verified byte for byte on every release"). Not before. -->
+      <p class="lead">This is the contract git-sprout is built to, and the differential test suite is being written to prove it. Until that suite is green, treat the list below as a design promise rather than a result.</p>
+    </div>
+
+    <ul class="checks reveal">
+      <li>Same flags, same stdout, same exit codes. Same stderr too, apart from the progress meter noted below.</li>
+      <li>Same hooks, in the same order, with the same arguments.</li>
+      <li>Same files, same modes, same index, compared byte for byte against real <code>git worktree add</code> across a matrix that includes <code>eol</code> conversion, <code>ident</code>, custom filters, LFS, submodules, sparse checkout, split index, SHA-256 repositories and case-insensitive filesystems, where the correct answer is the same set of already-modified paths git itself leaves behind rather than a clean worktree.</li>
+      <li>Untracked and ignored files are not copied, exactly as git does not copy them.</li>
+      <li><strong>Your repository's configuration is never modified.</strong></li>
+      <li>On a filesystem without block cloning, or in a repository that converts files on checkout, it simply runs <code>git worktree add</code>.</li>
+      <li>Any flag or combination it does not fully understand is not an error. It hands the whole command to git and exits with git's status.</li>
+    </ul>
+
+    <p class="note reveal">Two differences you can observe, both deliberate. Files that were cloned keep the timestamp they had in the checkout they came from, rather than the moment the worktree was created. Nothing git does depends on it, but <code>make</code> and anything else that reads modification times can see it.</p>
+
+    <p class="note reveal">And on a big repository <code>git worktree add</code> prints a progress meter while it writes the files out. sprout has almost no files left to write, so git never starts one: you see less output because less happened.</p>
+
+    <p class="note reveal">Beyond those two, and beyond time and disk, anything you can tell apart is a bug, and <a href="https://github.com/alltuner/git-sprout/tree/main/tests/differential">here is the test suite that is supposed to catch it</a>.</p>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<section id="agents" class="section">
+  <div class="container">
+    <div class="reveal">
+      <p class="eyebrow">Coding agents and CI</p>
+      <h2 class="section-title">Agents already create worktrees. Each one costs a full copy.</h2>
+    </div>
+
+    <div class="reveal">
+      <p class="lead">Coding agents create an isolated worktree per background session or task. Claude Code shells out to a plain <code>git worktree add</code> and locks the result; the harnesses and worktree managers people build on top do the same, because a worktree is the standard way to give an agent a tree it can break without touching yours.</p>
+
+      <div class="block">
+        <p class="block__label">What a harness runs, verbatim</p>
+<pre><code>git -c core.fsmonitor= worktree add --no-track -B &lt;branch&gt; &lt;path&gt; &lt;sha&gt;</code></pre>
+      </div>
+
+      <p class="note" style="margin-top:1.5rem">That changes the shape of the disk math. One engineer running several agents in parallel on a monorepo allocates a fresh <!--bench:kernel.disk.git.round-->1.8 GB<!--/bench--> per agent per task, and those worktrees are created and destroyed all day. On a CI or agent fleet it stops being a laptop annoyance and becomes a provisioning line item.</p>
+
+      <p class="note">Because the shim sits in front of <code>git</code> rather than in front of any particular tool, every harness gets this without knowing git-sprout exists: no plugin, no integration, no configuration inside the agent. The parity promise is what makes that safe: anything that intercepts <code>git</code> for an unattended session has to be indistinguishable from git.</p>
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<section id="install" class="section">
+  <div class="container">
+    <div class="reveal">
+      <p class="eyebrow">Install</p>
+      <h2 class="section-title">One command.</h2>
+    </div>
+
+    <div class="reveal" style="margin-top:2rem">
+      <div class="copy-row">
+        <code id="install-cmd">brew install alltuner/tap/git-sprout</code>
+        <button type="button" data-copy="#install-cmd" aria-label="Copy install command">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+        </button>
+      </div>
+
+      <p class="note" style="margin-top:1rem">Or <code>cargo install git-sprout</code>, or a binary from <a href="https://github.com/alltuner/git-sprout/releases">the releases page</a>.</p>
+
+      <div class="block">
+        <p class="block__label">Usage</p>
+<pre><code>git sprout add ../myrepo-feature -b feature     # or: git worktree-fast add</code></pre>
+      </div>
+
+      <p class="note" style="margin-top:1.5rem">Two things have to be true. The filesystem needs block cloning: <strong>APFS</strong> on macOS; <strong>btrfs, XFS with reflinks, or bcachefs</strong> on Linux; <strong>a ReFS volume or a Windows 11 Dev Drive</strong> on Windows. Everywhere else, ext4 and NTFS included, it runs plain <code>git worktree add</code>.</p>
+
+      <p class="note">And the repository has to be one that does not convert files on checkout, because a file can only be shared when checking it out would not rewrite its bytes. Git for Windows turns <code>core.autocrlf</code> on by default, and with that setting there is nothing to share, so on a typical Windows repository sprout passes straight through to <code>git worktree add</code>. The same goes for <code>* text=auto eol=crlf</code> on any platform. Repositories with no conversion attributes clone everything, which is the common case on macOS and Linux, the kernel included.</p>
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<section id="automatic" class="section">
+  <div class="container">
+    <div class="reveal">
+      <p class="eyebrow">Make it automatic</p>
+      <h2 class="section-title">There is no git setting that can redirect <code>git worktree add</code>.</h2>
+      <p class="lead">Tested, not assumed: git ignores an alias that shadows a builtin, and builtins never go through <code>GIT_EXEC_PATH</code> or <code>PATH</code>. So there are exactly two ways to make every worktree on a machine cheaper, and both are things you install deliberately.</p>
+    </div>
+
+    <div class="reveal">
+      <h3 style="margin-top:2.5rem;font-size:1.05rem">1. A shell function, for what you type yourself</h3>
+      <p class="note">Each block rewrites <code>git worktree add</code> and passes everything else through untouched. It only affects the interactive shell.</p>
+
+      <div class="block">
+        <p class="block__label">bash / zsh — ~/.bashrc, ~/.zshrc</p>
+<pre><code>git() {
+  if [ "${1:-}" = worktree ] &amp;&amp; [ "${2:-}" = add ]; then
+    shift 2
+    command git sprout add "$@"
+  else
+    command git "$@"
+  fi
+}</code></pre>
+      </div>
+
+      <div class="block">
+        <p class="block__label">fish — ~/.config/fish/config.fish</p>
+<pre><code>function git
+    if test (count $argv) -ge 2; and test "$argv[1]" = worktree; and test "$argv[2]" = add
+        command git sprout add $argv[3..]
+    else
+        command git $argv
+    end
+end</code></pre>
+      </div>
+
+      <div class="block">
+        <p class="block__label">PowerShell — $PROFILE</p>
+<pre><code>function git {
+    $real = (Get-Command git -CommandType Application | Select-Object -First 1).Source
+    if ($args.Count -ge 2 -and $args[0] -eq 'worktree' -and $args[1] -eq 'add') {
+        $rest = @($args | Select-Object -Skip 2)
+        &amp; $real sprout add @rest
+    } else {
+        &amp; $real @args
+    }
+}</code></pre>
+      </div>
+
+      <div class="block">
+        <p class="block__label">nushell — $nu.config-path</p>
+<pre><code>def --wrapped git [...args] {
+    if ($args | length) >= 2 and $args.0 == "worktree" and $args.1 == "add" {
+        ^git sprout add ...($args | skip 2)
+    } else {
+        ^git ...$args
+    }
+}</code></pre>
+      </div>
+
+      <!-- TODO(M4): drop this caveat once the PowerShell block has been run on a real
+           machine. Every other block on this page was executed before publishing. -->
+      <p class="note" style="margin-top:1.25rem">The bash, zsh, fish and nushell blocks were executed against a real git before this page went up. The PowerShell one was reviewed line by line but has not been run on any machine yet, so treat it as unverified and <a href="https://github.com/alltuner/git-sprout/issues">say so if it misbehaves</a>.</p>
+
+      <p class="note" style="margin-top:1.25rem">Each one matches only <code>worktree add</code> as the first two words. <code>git -C dir worktree add</code>, and anything else a script or an editor runs, goes to git untouched. That is what the shim below is for.</p>
+
+      <!-- TODO(M5): confirm the exact wrapper path and profile line against the shipped
+           `git sprout install-shim` before this section goes live. -->
+      <h3 style="margin-top:3rem;font-size:1.05rem">2. A <code>git</code> shim on <code>PATH</code>, for everything else</h3>
+      <p class="note">Editors, worktree managers, CI jobs and agent harnesses spawn <code>git</code> themselves, so a shell function never sees them. The shim is a small <code>git</code> wrapper in its own directory that you put ahead of the real git on <code>PATH</code>; it rewrites <code>worktree add</code> and passes every other command straight through to the real git.</p>
+
+      <div class="block">
+<pre><code>git sprout install-shim      # prints the directory it wrote and the PATH line to add
+git sprout uninstall-shim    # removes it</code></pre>
+      </div>
+
+      <p class="note" style="margin-top:1.25rem"><code>brew install</code> never does this on its own. A wrapper in front of <code>git</code> is yours to opt into, and one command to undo.</p>
+
+      <p class="note">If you already use a worktree manager, this makes it cheaper without changing anything about it: the shim is in front of git, not in front of your tools.</p>
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<p class="budget">This page is <!--budget:site.size-->36 KB<!--/budget--> and <!--budget:site.requests-->3<!--/budget--> requests. So is your fifth worktree.</p>
+
+</main>
+
+<footer class="site-footer">
+  <div class="container site-footer__row">
+    <div>
+      <div>Built by <a href="https://davidpoblador.com">David Poblador i Garcia</a> · <a href="https://alltuner.com">All Tuner Labs</a></div>
+      <div class="site-footer__sub">Made with ❤️ in Poblenou, Barcelona 🇪🇺</div>
+    </div>
+    <nav class="site-footer__links" aria-label="Footer">
+      <a href="https://github.com/alltuner/git-sprout">GitHub</a>
+      <a href="https://crates.io/crates/git-sprout">crates.io</a>
+      <a href="https://alltuner.com/sponsor">Sponsor</a>
+    </nav>
+  </div>
+</footer>
+
+<script>
+// Theme preference: dark -> light -> system, persisted. The head bootstrap applies the
+// stored choice before first paint; this handles the toggle and system changes.
+(function () {
+  var KEY = "at-theme", html = document.documentElement;
+  var toggle = document.querySelector("[data-theme-toggle]");
+  var mql = window.matchMedia("(prefers-color-scheme: light)");
+
+  function apply(pref) {
+    html.setAttribute("data-theme", pref === "system" ? (mql.matches ? "light" : "dark") : pref);
+    html.setAttribute("data-theme-pref", pref);
+    if (toggle) Array.prototype.forEach.call(toggle.querySelectorAll("[data-icon]"), function (el) {
+      el.hidden = el.getAttribute("data-icon") !== pref;
+    });
+  }
+  apply(localStorage.getItem(KEY) || "dark");
+
+  if (toggle) {
+    var order = ["dark", "light", "system"];
+    toggle.addEventListener("click", function () {
+      var next = order[(order.indexOf(html.getAttribute("data-theme-pref")) + 1) % 3];
+      localStorage.setItem(KEY, next);
+      apply(next);
+    });
+  }
+  mql.addEventListener("change", function () {
+    if (html.getAttribute("data-theme-pref") === "system") apply("system");
+  });
+
+  // Copy-to-clipboard for the install command.
+  Array.prototype.forEach.call(document.querySelectorAll("[data-copy]"), function (btn) {
+    btn.addEventListener("click", function () {
+      var text = document.querySelector(btn.getAttribute("data-copy")).textContent;
+      if (navigator.clipboard) navigator.clipboard.writeText(text);
+    });
+  });
+
+  var still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  var bars = document.querySelector(".bars");
+  if (!still && bars) bars.classList.add("chart-anim");
+
+  function show(el) { el.classList.add("is-visible"); }
+  var targets = document.querySelectorAll(".reveal, .bars");
+  if (still || !("IntersectionObserver" in window)) {
+    Array.prototype.forEach.call(targets, show);
+  } else {
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) { if (e.isIntersecting) { show(e.target); io.unobserve(e.target); } });
+    }, { threshold: 0.1, rootMargin: "0px 0px -40px 0px" });
+    Array.prototype.forEach.call(targets, function (el) { io.observe(el); });
+  }
+
+  // The one flourish: the hero figure counts down to its final value. The final value
+  // is what the HTML already contains, so this changes nothing without JS.
+  var from = document.getElementById("stat-git"), to = document.getElementById("stat-sprout");
+  if (!still && from && to) {
+    var start = parseFloat(from.textContent.replace(/[^0-9.]/g, ""));
+    var text = to.textContent, end = parseFloat(text.replace(/[^0-9.]/g, ""));
+    var unit = text.replace(/[0-9.\s]/g, "");
+    if (start > end) {
+      var t0 = performance.now(), span = 400;
+      var step = function (now) {
+        var p = Math.min((now - t0) / span, 1);
+        var v = start + (end - start) * (1 - Math.pow(1 - p, 3));
+        to.textContent = Math.round(v) + " " + unit;
+        if (p < 1) requestAnimationFrame(step); else to.textContent = text;
+      };
+      requestAnimationFrame(step);
+    }
+  }
+})();
+</script>
+
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "git-sprout",
+  "description": "A drop-in replacement for git worktree add that materialises the new worktree with filesystem copy-on-write clones instead of copying your tree.",
+  "applicationCategory": "DeveloperApplication",
+  "operatingSystem": "macOS, Linux, Windows",
+  "url": "https://sprout.alltuner.com/",
+  "codeRepository": "https://github.com/alltuner/git-sprout",
+  "license": "https://opensource.org/licenses/MIT",
+  "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+  "author": { "@type": "Organization", "name": "All Tuner Labs", "url": "https://alltuner.com" },
+  "publisher": { "@type": "Organization", "name": "All Tuner Labs", "url": "https://alltuner.com" }
+}
+</script>
+</body>
+</html>
