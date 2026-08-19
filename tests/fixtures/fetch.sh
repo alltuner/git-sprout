@@ -16,6 +16,13 @@ else
     git clone --depth 1 https://github.com/torvalds/linux "$KERNEL"
 fi
 
+# The fixture is the clone source, so its working tree has to be populated: with an
+# empty index there is nothing to clone from and no implementation can accelerate.
+if [ -z "$(git -C "$KERNEL" ls-files | head -1)" ]; then
+    echo "populating the kernel working tree"
+    git -C "$KERNEL" checkout
+fi
+
 tracked="$(git -C "$KERNEL" ls-files | wc -l | tr -d ' ')"
 echo "kernel fixture ready: $tracked tracked files at $(git -C "$KERNEL" rev-parse --short HEAD)"
 echo

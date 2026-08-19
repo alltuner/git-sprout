@@ -45,9 +45,8 @@ symlink target and content, and does not compare mtimes. It is worth saying expl
 in the spec, because "compare mtimes" is exactly the plausible-sounding assertion that
 would make the suite flaky and get it disabled.
 
-Note that mtimes still matter to the *implementation*: a cloned file keeps the source's
-mtime rather than getting the checkout's, which is observable to anything reading
-`stat` but is not a difference the compatibility contract can avoid.
+(The related question of what mtime a *cloned* file ends up with is item 9, which is a
+design decision rather than a spec defect.)
 
 ## 4. §3.3's hook ordering is a summary, not the sequence
 
@@ -117,3 +116,66 @@ left on disk differ between a repository that has commits and one that does not.
 sides of the comparison agree, so the contract holds; it is recorded here only because
 the flag matrix deliberately includes cases whose correct answer is an identical
 failure, and a reader of the suite may wonder why those are not skipped.
+
+## 9. Open design question: cloned files inherit the source's modification time
+
+**Measured, not inferred.** `tests/differential/tests/mtimes.rs` compares each file in
+the new worktree against the same path in the repository it was created from:
+
+```
+control (real git worktree add):   0 of 122 checked-out files kept the source's mtime
+candidate (git-sprout f4d7553):  122 of 122 checked-out files kept the source's mtime
+```
+
+`clonefile(2)` copies the timestamps along with the blocks, so every cloned path lands
+with whatever mtime the source checkout had - which may be days old. `git worktree add`
+stamps every file with the moment of the checkout.
+
+**This is an observable difference, and §3 claims indistinguishability in everything
+except disk and time.** It is not a stat field that merely differs between two runs,
+like an inode: it differs *systematically and in one direction*, and the thing that
+reads it is every mtime-driven build system there is. `make` in a fresh sprout worktree
+sees sources older than an artefact restored from a cache and skips work it should do;
+`cargo`, `ninja` and `tsc` all key on mtime too. That audience is exactly the audience
+for a tool whose pitch is "your fifth worktree costs no disk".
+
+The fix looks cheap: `utimensat` each clone to the checkout's timestamp before writing
+the scratch index, and record that timestamp in the index entry so the entry stays
+stat-clean. It is one extra syscall per cloned path - against roughly 26 000 clones per
+second, a `utimensat` per file is in the same order and would cost something, but the
+kernel measurement gives room (5.9s against git's 18.2s).
+
+Three options, in the order I would rank them:
+
+1. **Stamp cloned files with the checkout time.** Matches git exactly, costs one syscall
+   per path. My recommendation.
+2. **Leave the source's mtime and document it** as the one deliberate exception to §3,
+   in the README next to the compatibility promise rather than buried. Defensible only
+   if the syscall cost turns out to be real.
+3. **Make it a flag.** Worst of the three: it puts a correctness-shaped decision in the
+   user's hands and doubles the surface the differential suite has to cover.
+
+Whichever is chosen, it should be chosen. The test above prints the verdict on every
+run and asserts the control invariant (git never inherits an mtime), so the current
+behaviour is visible rather than accidental - but it deliberately does not fail on the
+difference, because the contract has not yet said which answer is correct.
+
+## 10. Progress output is a real divergence, not just a normalisation problem
+
+Item 7 said the spec cannot mean "stderr byte for byte" while git's progress meter is
+timing-dependent. Running the suite against the real binary turned that from a
+normalisation question into a finding:
+
+```
+control   stderr: "Preparing worktree (new branch '…')\nUpdating files: 100% (95056/95056), done.\n"
+candidate stderr: "Preparing worktree (new branch '…')\n"
+```
+
+The candidate emits no progress line at all - not different frames, none. That follows
+from the technique: git's final checkout has almost nothing left to write, so it never
+starts a meter. Only the kernel fixture catches it, because git does not show progress
+on a small checkout, so every other fixture is silent on both sides.
+
+So §3.2 needs a decision too: either the tool synthesises
+`Updating files: 100% (N/N), done.` (it knows N), or the spec exempts progress output
+explicitly. The harness keeps the final frame precisely so this stays visible.

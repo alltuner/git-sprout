@@ -50,6 +50,9 @@ jobs:
         # repository-independent and is covered in full on the other two platforms.
         env:
           SPROUT_FLAG_MATRIX: ${{ runner.os == 'Windows' && 'core' || 'full' }}
+          # Never let the statistics assertions arm themselves in CI: a suite that
+          # never arms is indistinguishable from one that passes.
+          SPROUT_REQUIRE_STATS: ${{ matrix.mode == 'tool' && '1' || '' }}
         run: cargo test --release --manifest-path $MANIFEST -- --nocapture
         shell: bash
 
@@ -92,6 +95,8 @@ jobs:
       - name: Differential suite on ${{ matrix.fs }}
         env:
           SPROUT_TEST_TMPDIR: /mnt/fsimage/scratch
+          # ext4 has no block cloning, so acceleration must not be required there.
+          SPROUT_REQUIRE_STATS: ${{ matrix.fs != 'ext4' && '1' || '' }}
         run: |
           SPROUT_BIN=$PWD/target/release/git-sprout \
             cargo test --release --manifest-path $MANIFEST -- --nocapture
@@ -168,6 +173,7 @@ jobs:
       - name: Kernel parity, against the tool
         env:
           SPROUT_BIN: ${{ github.workspace }}/target/release/git-sprout
+          SPROUT_REQUIRE_STATS: "1"
         run: cargo test --release --manifest-path $MANIFEST --test kernel -- --ignored --nocapture
 
   lint:

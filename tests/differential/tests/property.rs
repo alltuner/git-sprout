@@ -28,7 +28,9 @@ fn random_repositories_and_flags_match_git() {
         match runner.run(&template, flags, None).expect("case run") {
             Outcome::NotApplicable(_) => {}
             Outcome::Ran(result) => {
-                if !result.differences.is_empty() {
+                if result.differences.is_empty() {
+                    runner.release(&result.case_dir);
+                } else {
                     failures.push(format!(
                         "seed {case_seed}{}",
                         case::report(&template.name, flags, runner.tool(), &result)

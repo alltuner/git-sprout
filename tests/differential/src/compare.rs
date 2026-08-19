@@ -29,6 +29,15 @@ pub fn compare(control: &Snapshot, candidate: &Snapshot) -> Vec<Difference> {
 
     d.text("stdout", &control.stdout, &candidate.stdout);
     d.text("stderr", &control.stderr, &candidate.stderr);
+    if control.timed_out || candidate.timed_out {
+        d.push(
+            "hang",
+            format!(
+                "the add never finished and was killed (control timed out: {}, candidate: {})",
+                control.timed_out, candidate.timed_out
+            ),
+        );
+    }
     if control.status != candidate.status {
         d.push(
             "exit status",

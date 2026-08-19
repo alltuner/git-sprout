@@ -68,6 +68,18 @@ fn kernel_worktree_matches_git() {
     println!("kernel repository: {}", repo.display());
     println!("candidate: {}", tool.describe());
 
+    // A bare or --no-checkout clone has no working tree to clone from, so nothing can
+    // be accelerated against it and the failure would read as a tool bug.
+    let populated = run::git_line(&workspace, &repo, &["ls-files"]);
+    assert!(
+        !populated.is_empty(),
+        "the kernel fixture at {} has an empty index, so it has no working tree to clone \
+         from and no implementation could accelerate against it. Run `git -C {} checkout` \
+         first; a --no-checkout or bare clone is not a usable fixture.",
+        repo.display(),
+        repo.display()
+    );
+
     let case_insensitive = is_case_insensitive(&cache);
     println!(
         "destination volume is case-{}",
@@ -107,6 +119,45 @@ fn kernel_worktree_matches_git() {
             .collect::<Vec<_>>()
             .join("\n  ")
     );
+
+    check_acceleration(&candidate);
+}
+
+/// The kernel is where acceleration is worth having, so a run against a real
+/// binary has to show it happened. Absent statistics mean an uninstrumented
+/// binary, which is reported rather than silently accepted.
+fn check_acceleration(candidate: &Snapshot) {
+    let Some(stats) = &candidate.stats else {
+        println!(
+            "NOT MEASURED: the candidate reported no statistics, so this run proved parity \
+             only and not that anything was cloned."
+        );
+        assert!(
+            std::env::var_os("SPROUT_REQUIRE_STATS").is_none(),
+            "the candidate reported no statistics and SPROUT_REQUIRE_STATS is set"
+        );
+        return;
+    };
+    println!("candidate statistics: {stats:?}");
+    assert!(
+        stats.accelerated(),
+        "nothing was cloned on the fixture that exists to prove cloning works \
+         (cloned={}, reason={:?}); the worktree may be correct but the fast path never ran",
+        stats.cloned,
+        stats.fallback_reason
+    );
+    assert_eq!(
+        stats.cloned + stats.skipped,
+        TRACKED_FILES as u64,
+        "every tracked path should have been either cloned or skipped"
+    );
+    // The one-call subtree clone is a separate mechanism from the per-file clone and
+    // can stop firing without moving any other counter.
+    #[cfg(target_os = "macos")]
+    assert!(
+        stats.cloned_directories > 0,
+        "no subtree was cloned in one call on a platform that offers directory cloning"
+    );
 }
 
 fn kernel_repo() -> Option<PathBuf> {
@@ -145,6 +196,13 @@ fn run_side(
     let started = Instant::now();
     let output = run::worktree_add(workspace, &side, tool, &argv).expect("worktree add");
     let elapsed = started.elapsed();
+    assert!(
+        !output.timed_out,
+        "{label} never finished and was killed after {:.0}s. A worktree add that hangs on \
+         95 056 paths is a deadlock, not a slow machine; raise SPROUT_ADD_TIMEOUT_SECS only \
+         if the machine is genuinely that slow.",
+        elapsed.as_secs_f64()
+    );
     assert_eq!(
         output.status,
         0,

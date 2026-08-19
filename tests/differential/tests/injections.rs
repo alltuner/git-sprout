@@ -68,6 +68,7 @@ fn every_injection_is_detected() {
                         injection.name()
                     ));
                 }
+                runner.release(&result.case_dir);
                 let reported = result
                     .differences
                     .iter()

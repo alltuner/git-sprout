@@ -3,8 +3,10 @@
 
 use crate::env::Workspace;
 use crate::stats::Stats;
+use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Stdio};
+use std::time::{Duration, Instant};
 
 /// Hooks git fires during a worktree add, per the semantics probe against git 2.55.0.
 const LOGGED_HOOKS: &[&str] = &[
@@ -78,6 +80,19 @@ pub struct RunOutput {
     pub status: i32,
     pub hooks: Vec<String>,
     pub stats: Option<Stats>,
+    /// The run had to be killed. A worktree add that never returns is a failure
+    /// with a name, not a suite that sits there until CI gives up on it.
+    pub timed_out: bool,
+}
+
+/// How long one add may take before the harness kills it and calls it a hang.
+/// Generous enough for a 95 000-file checkout on a loaded machine.
+fn add_timeout() -> Duration {
+    let seconds = std::env::var("SPROUT_ADD_TIMEOUT_SECS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(300);
+    Duration::from_secs(seconds)
 }
 
 /// Installs the logging hooks in a repository. The log path is absolute because the
@@ -146,16 +161,74 @@ pub fn worktree_add(
     cmd.env("SPROUT_STATS_FILE", &side.stats_file);
     cmd.stdin(Stdio::null());
 
-    let out = cmd.output()?;
+    let out = run_with_timeout(cmd, add_timeout())?;
     let hooks = read_hook_log(&side.hook_log);
     let stats = Stats::collect(&side.stats_file, &out.stderr);
     Ok(RunOutput {
         stdout: out.stdout,
         stderr: out.stderr,
-        status: exit_code(&out.status),
+        status: out.status,
         hooks,
         stats,
+        timed_out: out.timed_out,
     })
+}
+
+struct Captured {
+    stdout: Vec<u8>,
+    stderr: Vec<u8>,
+    status: i32,
+    timed_out: bool,
+}
+
+/// Runs a command, draining both pipes on their own threads so a chatty child
+/// cannot fill a pipe buffer and deadlock, and killing it if it outlives the
+/// deadline. Whatever it wrote before being killed is still returned.
+fn run_with_timeout(mut cmd: Command, timeout: Duration) -> std::io::Result<Captured> {
+    cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
+    let mut child = cmd.spawn()?;
+    let mut stdout = child.stdout.take().expect("stdout is piped");
+    let mut stderr = child.stderr.take().expect("stderr is piped");
+
+    let readers = std::thread::scope(|scope| {
+        let out = scope.spawn(move || {
+            let mut buffer = Vec::new();
+            let _ = stdout.read_to_end(&mut buffer);
+            buffer
+        });
+        let err = scope.spawn(move || {
+            let mut buffer = Vec::new();
+            let _ = stderr.read_to_end(&mut buffer);
+            buffer
+        });
+        let (status, timed_out) = wait_or_kill(&mut child, timeout);
+        let stdout = out.join().unwrap_or_default();
+        let stderr = err.join().unwrap_or_default();
+        Captured {
+            stdout,
+            stderr,
+            status,
+            timed_out,
+        }
+    });
+    Ok(readers)
+}
+
+fn wait_or_kill(child: &mut Child, timeout: Duration) -> (i32, bool) {
+    let deadline = Instant::now() + timeout;
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return (exit_code(&status), false),
+            Ok(None) => {}
+            Err(_) => return (-1, false),
+        }
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let status = child.wait().ok().map(|s| exit_code(&s)).unwrap_or(-1);
+            return (status, true);
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
 }
 
 fn read_hook_log(path: &Path) -> Vec<String> {

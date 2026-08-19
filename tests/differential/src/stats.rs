@@ -12,7 +12,13 @@ pub const STDERR_PREFIX: &str = "sprout-stats: ";
 #[serde(default)]
 pub struct Stats {
     pub cloned: u64,
+    /// Subtrees cloned in one call, where the platform offers a directory clone.
+    /// It can stop firing without any other counter moving, so it is asserted on
+    /// its own wherever the platform is expected to use it.
+    pub cloned_directories: u64,
     pub skipped: u64,
+    /// Not an independent measurement: it is `skipped` by construction, and both
+    /// are zero when no plan ran at all. Never treat it as a third signal.
     pub checked_out_by_git: u64,
     pub source: Option<String>,
     pub clone_backend: Option<String>,
@@ -41,7 +47,11 @@ impl Stats {
     }
 
     /// True when the run actually used the copy-on-write path for some files.
+    ///
+    /// The test is `cloned`, not `fell_back`: a partial demotion sets
+    /// `fallback_reason` while still having cloned most of the tree, and the
+    /// question this answers is whether acceleration happened at all.
     pub fn accelerated(&self) -> bool {
-        self.cloned > 0 && !self.fell_back
+        self.cloned > 0
     }
 }

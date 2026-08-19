@@ -56,6 +56,12 @@ impl Runner {
         &self.workspace
     }
 
+    /// Discards a finished case's scratch directory. Callers keep the directories of
+    /// cases they still have something to say about.
+    pub fn release(&self, case_dir: &std::path::Path) {
+        self.workspace.release_case(case_dir);
+    }
+
     /// A template built from the seeded random generator rather than a named builder.
     pub fn random_template(&self, seed: u64) -> std::io::Result<Template> {
         let name = format!("random-{seed}");
@@ -97,8 +103,8 @@ impl Runner {
     }
 
     /// Runs one comparison. `injection` corrupts the candidate side on purpose and
-    /// is `None` for every real compatibility case. A case that matched has its
-    /// scratch directory released; a case that differed keeps it for inspection.
+    /// is `None` for every real compatibility case. The case directory is left on
+    /// disk for the caller to inspect and release with [`Runner::release`].
     pub fn run(
         &self,
         template: &Template,
@@ -149,9 +155,6 @@ impl Runner {
         )?;
 
         let differences = compare::compare(&control_snapshot, &candidate_snapshot);
-        if differences.is_empty() {
-            self.workspace.release_case(&case_dir);
-        }
         Ok(Outcome::Ran(Box::new(CaseResult {
             differences,
             control: control_snapshot,
@@ -204,7 +207,9 @@ pub fn check_fixture(fixture: &str, cases: &[&FlagCase]) {
                 match runner.run(&template, flags, None).expect("case run") {
                     Outcome::NotApplicable(_) => {}
                     Outcome::Ran(result) => {
-                        if !result.differences.is_empty() {
+                        if result.differences.is_empty() {
+                            runner.release(&result.case_dir);
+                        } else {
                             failures.lock().expect("failure list").push(report(
                                 fixture,
                                 flags,

@@ -72,6 +72,7 @@ pub struct Snapshot {
     pub stdout: String,
     pub stderr: String,
     pub status: i32,
+    pub timed_out: bool,
     pub hooks: Vec<String>,
     pub stats: Option<Stats>,
     pub worktree_exists: bool,
@@ -108,6 +109,7 @@ pub fn capture(
         stdout: norm.text(&output.stdout),
         stderr: norm.stderr(&output.stderr),
         status: output.status,
+        timed_out: output.timed_out,
         hooks: output
             .hooks
             .iter()
