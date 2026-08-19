@@ -99,6 +99,21 @@ open(path, "wb").write(text.encode("utf-16"))
 ENC
 }
 
+# Replaces the working tree with what a checkout of HEAD actually produces.
+#
+# Writing a file and committing it does not give you a canonical checkout when an
+# attribute converts on the way out: with core.autocrlf=true a file written with LF
+# stays LF on disk, git's clean filter turns it into the same blob, and git therefore
+# reports the tree as clean - while a fresh checkout of that blob would write CRLF.
+# A source worktree in that state is legitimate but it is not what a user who cloned
+# the repository has, and nothing may clone from it, so the conversion fixtures
+# normalise before they are used as a clone source.
+canonical_checkout() {
+    find "$REPO" -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+    gq checkout -f -- .
+    g update-index --refresh -q >/dev/null 2>&1 || true
+}
+
 # The refs the flag matrix reaches for: a tag, a branch that already exists, and a
 # remote with two tracking branches so --track and --guess-remote have something to
 # resolve. Best effort: a repository with no commits gets none of them.

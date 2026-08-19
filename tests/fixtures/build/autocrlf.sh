@@ -8,4 +8,5 @@ g config core.autocrlf true
 base_history
 write_text_tree "src" 60 25 60
 commit "text heavy tree"
+canonical_checkout
 finish_repo

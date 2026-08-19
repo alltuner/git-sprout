@@ -13,4 +13,5 @@ commit "lf in the subtree"
 
 printf 'page.txt text eol=crlf\n' > "$REPO/sub/.gitattributes"
 commit "crlf in the subtree"
+canonical_checkout
 finish_repo

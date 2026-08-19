@@ -10,4 +10,5 @@ write_text "src/one.txt" 20
 write_text "src/two.txt" 30
 write_binary "src/data.bin" 4
 commit "crlf tree"
+canonical_checkout
 finish_repo

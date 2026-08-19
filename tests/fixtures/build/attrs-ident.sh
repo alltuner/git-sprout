@@ -10,4 +10,5 @@ mkdir -p "$REPO/src"
 printf 'const char *id = "$Id$";\nint main(void) { return 0; }\n' > "$REPO/src/main.c"
 printf 'static const char *v = "$Id$";\n' > "$REPO/src/version.c"
 commit "ident tree"
+canonical_checkout
 finish_repo

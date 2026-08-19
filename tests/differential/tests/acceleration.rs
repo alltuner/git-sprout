@@ -7,8 +7,25 @@ use differential::run::Tool;
 
 /// Fixtures whose whole point is that cloning fires. `autocrlf` is the one that
 /// proves index-based verification works: every text file's working-tree bytes
-/// differ from its blob, so a hash-against-blob rule would accelerate nothing.
+/// differ from its blob, so a rule that excludes converted paths accelerates
+/// nothing there - and `core.autocrlf=true` is the Git for Windows installer
+/// default, so "nothing there" means "nothing on Windows".
 const ACCELERATED: &[&str] = &["text-heavy", "autocrlf"];
+
+/// Extra context for the fixture that exists to catch exactly one design mistake.
+fn why_it_matters(fixture: &str) -> &'static str {
+    if fixture == "autocrlf" {
+        "\n  This is the case spec §3.4 and §6.1 single out: the index-based rule in \
+         §4 step 5 exists so that a repository where every text file is converted on \
+         checkout still accelerates. A blanket exclusion of converting paths is safe \
+         but reduces acceleration to zero on the Git for Windows default. Note that \
+         `git ls-files --eol` reports w/crlf against w/lf per path in one call, which \
+         distinguishes a source that already holds the checked-out form from one that \
+         does not, without reading any file."
+    } else {
+        ""
+    }
+}
 
 #[test]
 fn the_fast_path_is_taken_where_the_fixture_exists_to_prove_it() {
@@ -46,9 +63,12 @@ fn the_fast_path_is_taken_where_the_fixture_exists_to_prove_it() {
                 println!("{fixture}: {stats:?}");
                 if !stats.accelerated() {
                     failures.push(format!(
-                        "{fixture}: nothing was cloned (cloned={}, fell_back={}, reason={:?}); \
-                         the output may be right but the fast path never ran",
-                        stats.cloned, stats.fell_back, stats.fallback_reason
+                        "{fixture}: nothing was cloned (cloned={}, skipped={}, reason={:?}); \
+                         the output may be right but the fast path never ran{}",
+                        stats.cloned,
+                        stats.skipped,
+                        stats.fallback_reason,
+                        why_it_matters(fixture)
                     ));
                 }
             }
