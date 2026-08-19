@@ -91,7 +91,26 @@ PROVISIONAL=1
 mkdir -p "$CACHE" "$SCRATCH" "$(dirname "$OUT")"
 BENCH_RAW="$(mktemp "${TMPDIR:-/tmp}/bench-raw.XXXXXX")"
 export BENCH_RAW
-trap 'rm -f "$BENCH_RAW"' EXIT
+SC_REPO=""
+# An interrupted run must not leave a benchmark worktree behind, or the next run
+# measures a volume that is still holding gigabytes it was never told about.
+cleanup() {
+  rm -f "$BENCH_RAW"
+  [ -n "$SC_REPO" ] && [ -e "$SC_REPO/.git" ] || return 0
+  git -C "$SC_REPO" worktree list --porcelain 2>/dev/null |
+    awk '/^worktree /{print $2}' |
+    grep -E '/wt-[a-z-]+-(git|sprout)-(warmup|[0-9]+)$' |
+    while read -r leftover; do
+      git -C "$SC_REPO" worktree remove --force "$leftover" >/dev/null 2>&1 || rm -rf "$leftover"
+    done
+  git -C "$SC_REPO" branch --list 'bench-*' --format='%(refname:short)' 2>/dev/null |
+    while read -r leftover; do
+      git -C "$SC_REPO" branch -D "$leftover" >/dev/null 2>&1 || true
+    done
+  git -C "$SC_REPO" worktree prune >/dev/null 2>&1 || true
+  return 0
+}
+trap cleanup EXIT
 
 git_c() { local repo="$1"; shift; git -C "$repo" -c user.email=bench@example.invalid -c user.name=bench "$@"; }
 argv_json() { python3 -c 'import json, sys; print(json.dumps(sys.argv[1:]))' "$@"; }
@@ -116,7 +135,7 @@ record kind=meta \
 # --- measurement ---------------------------------------------------------------
 
 # Set by each scenario before calling measure_sides.
-SC_REPO=""; SC_VOL=""; SC_DESTDIR=""; SC_COMMITISH=""
+SC_VOL=""; SC_DESTDIR=""; SC_COMMITISH=""
 
 build_argv() { # side dest branch
   local side="$1" dest="$2" branch="$3"
