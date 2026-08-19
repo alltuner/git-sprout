@@ -51,6 +51,18 @@ impl Stats {
     /// The test is `cloned`, not `fell_back`: a partial demotion sets
     /// `fallback_reason` while still having cloned most of the tree, and the
     /// question this answers is whether acceleration happened at all.
+    /// False when the run fell back because the filesystem cannot clone blocks at
+    /// all — ext4, NTFS, tmpfs. Acceleration is not assertable there, and the
+    /// fallback being correct is what the rest of the suite checks.
+    pub fn supports_cloning(&self) -> bool {
+        match self.fallback_reason.as_deref() {
+            Some(reason) => {
+                !reason.contains("not supported") && !reason.contains("Operation not permitted")
+            }
+            None => true,
+        }
+    }
+
     pub fn accelerated(&self) -> bool {
         self.cloned > 0
     }

@@ -59,7 +59,13 @@ fn the_fast_path_is_taken_where_the_fixture_exists_to_prove_it() {
             Some(stats) => {
                 measured += 1;
                 println!("{fixture}: {stats:?}");
-                if !stats.accelerated() {
+                if !stats.supports_cloning() {
+                    println!(
+                        "{fixture}: this filesystem has no block cloning ({:?}); \
+                         the fast path cannot be asserted here",
+                        stats.fallback_reason
+                    );
+                } else if !stats.accelerated() {
                     failures.push(format!(
                         "{fixture}: nothing was cloned (cloned={}, skipped={}, reason={:?}); \
                          the output may be right but the fast path never ran",
