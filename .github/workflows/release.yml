@@ -1,0 +1,211 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Rebuild/republish this tag (e.g. v0.1.0). Leave blank to defer to release-please."
+        required: false
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+
+# Serialize release runs so back-to-back releases queue instead of contending
+# for the runner pool. cancel-in-progress stays false: an in-flight publish must
+# never be cancelled, or a version gets skipped.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+      version: ${{ steps.release.outputs.version }}
+    steps:
+      - id: release
+        if: github.event_name != 'workflow_dispatch' || inputs.tag == ''
+        uses: googleapis/release-please-action@v5
+        with:
+          config-file: .release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+  resolve-tag:
+    needs: release-please
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.pick.outputs.tag }}
+      version: ${{ steps.pick.outputs.version }}
+    steps:
+      - id: pick
+        env:
+          DISPATCH_TAG: ${{ inputs.tag }}
+          RP_CREATED: ${{ needs.release-please.outputs.release_created }}
+          RP_TAG: ${{ needs.release-please.outputs.tag_name }}
+          RP_VERSION: ${{ needs.release-please.outputs.version }}
+        run: |
+          if [ -n "$DISPATCH_TAG" ]; then
+            echo "tag=$DISPATCH_TAG" >> "$GITHUB_OUTPUT"
+            echo "version=${DISPATCH_TAG#v}" >> "$GITHUB_OUTPUT"
+          elif [ "$RP_CREATED" = "true" ]; then
+            echo "tag=$RP_TAG" >> "$GITHUB_OUTPUT"
+            echo "version=$RP_VERSION" >> "$GITHUB_OUTPUT"
+          fi
+
+  publish-crate:
+    needs: [release-please, resolve-tag]
+    if: needs.resolve-tag.outputs.tag != ''
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.resolve-tag.outputs.tag }}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: rust-lang/crates-io-auth-action@v1
+        id: auth
+      - run: cargo publish -p git-sprout
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+
+  build-binaries:
+    needs: [release-please, resolve-tag]
+    if: needs.resolve-tag.outputs.tag != ''
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            os: macos-latest
+          - target: x86_64-apple-darwin
+            os: macos-latest
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+          - target: aarch64-pc-windows-msvc
+            os: windows-latest
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.resolve-tag.outputs.tag }}
+
+      - uses: houseabsolute/actions-rust-cross@v1.0.8
+        with:
+          target: ${{ matrix.target }}
+          args: --release --package git-sprout
+          strip: true
+
+      - name: Create archive (unix)
+        if: runner.os != 'Windows'
+        run: |
+          cd target/${{ matrix.target }}/release
+          tar -czvf ../../../git-sprout-${{ matrix.target }}.tar.gz git-sprout git-worktree-fast
+
+      - name: Create archive (windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          cd target/${{ matrix.target }}/release
+          tar -czvf ../../../git-sprout-${{ matrix.target }}.tar.gz git-sprout.exe git-worktree-fast.exe
+
+      - name: Upload to release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ needs.resolve-tag.outputs.tag }}
+          files: git-sprout-${{ matrix.target }}.tar.gz
+
+  brew-formula:
+    needs: [resolve-tag, build-binaries]
+    if: needs.resolve-tag.outputs.tag != ''
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download release tarballs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.resolve-tag.outputs.tag }}
+        run: |
+          for target in aarch64-apple-darwin x86_64-apple-darwin aarch64-unknown-linux-gnu x86_64-unknown-linux-gnu; do
+            gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern "git-sprout-$target.tar.gz"
+          done
+
+      - name: Generate and push formula
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          TAG: ${{ needs.resolve-tag.outputs.tag }}
+          VERSION: ${{ needs.resolve-tag.outputs.version }}
+        run: |
+          MAC_ARM_SHA=$(sha256sum git-sprout-aarch64-apple-darwin.tar.gz | awk '{print $1}')
+          MAC_INTEL_SHA=$(sha256sum git-sprout-x86_64-apple-darwin.tar.gz | awk '{print $1}')
+          LINUX_ARM_SHA=$(sha256sum git-sprout-aarch64-unknown-linux-gnu.tar.gz | awk '{print $1}')
+          LINUX_INTEL_SHA=$(sha256sum git-sprout-x86_64-unknown-linux-gnu.tar.gz | awk '{print $1}')
+
+          BASE_URL="https://github.com/alltuner/git-sprout/releases/download/${TAG}"
+
+          FORMULA_CONTENT=$(cat <<RUBY
+          class GitSprout < Formula
+            desc "Drop-in git worktree add that clones the tree instead of copying it"
+            homepage "https://sprout.alltuner.com"
+            version "${VERSION}"
+            license "MIT"
+
+            on_macos do
+              if Hardware::CPU.arm?
+                url "${BASE_URL}/git-sprout-aarch64-apple-darwin.tar.gz"
+                sha256 "${MAC_ARM_SHA}"
+              else
+                url "${BASE_URL}/git-sprout-x86_64-apple-darwin.tar.gz"
+                sha256 "${MAC_INTEL_SHA}"
+              end
+            end
+
+            on_linux do
+              if Hardware::CPU.arm?
+                url "${BASE_URL}/git-sprout-aarch64-unknown-linux-gnu.tar.gz"
+                sha256 "${LINUX_ARM_SHA}"
+              else
+                url "${BASE_URL}/git-sprout-x86_64-unknown-linux-gnu.tar.gz"
+                sha256 "${LINUX_INTEL_SHA}"
+              end
+            end
+
+            def install
+              bin.install "git-sprout"
+              bin.install "git-worktree-fast"
+            end
+
+            test do
+              assert_match version.to_s, shell_output("#{bin}/git-sprout --version")
+            end
+          end
+          RUBY
+          )
+
+          ENCODED=$(echo "$FORMULA_CONTENT" | base64 -w 0)
+          EXISTING_SHA=$(gh api repos/alltuner/homebrew-tap/contents/Formula/git-sprout.rb -q '.sha' 2>/dev/null || true)
+
+          if [ -n "$EXISTING_SHA" ]; then
+            gh api repos/alltuner/homebrew-tap/contents/Formula/git-sprout.rb \
+              --method PUT \
+              -f message="git-sprout: update to v${VERSION}" \
+              -f content="$ENCODED" \
+              -f sha="$EXISTING_SHA"
+          else
+            gh api repos/alltuner/homebrew-tap/contents/Formula/git-sprout.rb \
+              --method PUT \
+              -f message="git-sprout: add formula at v${VERSION}" \
+              -f content="$ENCODED"
+          fi

@@ -1,0 +1,7 @@
+/target
+target/
+.DS_Store
+.env
+/.claude/
+/bench/results/
+/tests/fixtures/cache/

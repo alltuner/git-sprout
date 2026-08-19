@@ -1,0 +1,30 @@
+{
+  "packages": {
+    "crates/git-sprout": {
+      "package-name": "git-sprout",
+      "release-type": "rust",
+      "changelog-path": "CHANGELOG.md",
+      "bump-minor-pre-major": true,
+      "bump-patch-for-minor-pre-major": true,
+      "extra-files": [
+        {
+          "type": "toml",
+          "path": "/Cargo.lock",
+          "jsonpath": "$.package[?(@.name.value=='git-sprout')].version"
+        }
+      ],
+      "changelog-sections": [
+        { "type": "feat",     "section": "Features" },
+        { "type": "fix",      "section": "Bug Fixes" },
+        { "type": "refactor", "section": "Code Refactoring" },
+        { "type": "perf",     "section": "Performance Improvements" },
+        { "type": "chore",    "section": "Miscellaneous Chores" },
+        { "type": "docs",     "section": "Documentation Updates" },
+        { "type": "ci",       "section": "CI/CD Changes" },
+        { "type": "style",    "section": "Styling Changes" },
+        { "type": "build",    "section": "Build System" },
+        { "type": "test",     "section": "Tests" }
+      ]
+    }
+  }
+}

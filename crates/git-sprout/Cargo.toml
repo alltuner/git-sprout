@@ -1,0 +1,25 @@
+[package]
+name = "git-sprout"
+version = "0.0.0"
+edition = "2021"
+rust-version = "1.85"
+description = "A drop-in git worktree add that materialises the tree with filesystem copy-on-write clones"
+license = "MIT"
+repository = "https://github.com/alltuner/git-sprout"
+homepage = "https://sprout.alltuner.com"
+documentation = "https://docs.rs/git-sprout"
+readme = "README.md"
+keywords = ["git", "worktree", "copy-on-write", "reflink", "apfs"]
+categories = ["command-line-utilities", "development-tools"]
+
+[[bin]]
+name = "git-sprout"
+path = "src/bin/git-sprout.rs"
+
+[[bin]]
+name = "git-worktree-fast"
+path = "src/bin/git-worktree-fast.rs"
+
+[dependencies]
+
+[dev-dependencies]
