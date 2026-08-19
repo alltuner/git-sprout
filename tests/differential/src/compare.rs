@@ -30,7 +30,10 @@ pub fn compare(control: &Snapshot, candidate: &Snapshot) -> Vec<Difference> {
     d.text("stdout", &control.stdout, &candidate.stdout);
     d.text("stderr", &control.stderr, &candidate.stderr);
     if control.status != candidate.status {
-        d.push("exit status", format!("{} vs {}", control.status, candidate.status));
+        d.push(
+            "exit status",
+            format!("{} vs {}", control.status, candidate.status),
+        );
     }
     d.sequence("hooks fired", &control.hooks, &candidate.hooks);
 
@@ -44,23 +47,52 @@ pub fn compare(control: &Snapshot, candidate: &Snapshot) -> Vec<Difference> {
         );
     }
 
-    d.map("working tree", &control.tree, &candidate.tree, TreeEntry::describe);
-    d.set("git status --porcelain", &control.porcelain, &candidate.porcelain);
+    d.map(
+        "working tree",
+        &control.tree,
+        &candidate.tree,
+        TreeEntry::describe,
+    );
+    d.set(
+        "git status --porcelain",
+        &control.porcelain,
+        &candidate.porcelain,
+    );
     if control.head != candidate.head {
         d.push("HEAD", format!("{} vs {}", control.head, candidate.head));
     }
     if control.head_reflog_entry != candidate.head_reflog_entry {
         d.push(
             "HEAD@{0}",
-            format!("{} vs {}", control.head_reflog_entry, candidate.head_reflog_entry),
+            format!(
+                "{} vs {}",
+                control.head_reflog_entry, candidate.head_reflog_entry
+            ),
         );
     }
     d.sequence("reflog", &control.reflog, &candidate.reflog);
     d.set("refs", &control.refs, &candidate.refs);
-    d.sequence("worktree list", &control.worktree_list, &candidate.worktree_list);
-    d.map("worktree admin dir", &control.admin, &candidate.admin, AdminEntry::describe);
-    d.sequence("ls-files --stage", &control.ls_files_stage, &candidate.ls_files_stage);
-    d.sequence("ls-files -v", &control.ls_files_flags, &candidate.ls_files_flags);
+    d.sequence(
+        "worktree list",
+        &control.worktree_list,
+        &candidate.worktree_list,
+    );
+    d.map(
+        "worktree admin dir",
+        &control.admin,
+        &candidate.admin,
+        AdminEntry::describe,
+    );
+    d.sequence(
+        "ls-files --stage",
+        &control.ls_files_stage,
+        &candidate.ls_files_stage,
+    );
+    d.sequence(
+        "ls-files -v",
+        &control.ls_files_flags,
+        &candidate.ls_files_flags,
+    );
     compare_index(&mut d, "index", &control.index, &candidate.index);
     if control.shared_index_count != candidate.shared_index_count {
         d.push(
@@ -90,11 +122,17 @@ fn compare_index(
     if control.parse_error != candidate.parse_error {
         d.push(
             area,
-            format!("parse result {:?} vs {:?}", control.parse_error, candidate.parse_error),
+            format!(
+                "parse result {:?} vs {:?}",
+                control.parse_error, candidate.parse_error
+            ),
         );
     }
     if control.version != candidate.version {
-        d.push(area, format!("version {} vs {}", control.version, candidate.version));
+        d.push(
+            area,
+            format!("version {} vs {}", control.version, candidate.version),
+        );
     }
     if control.declared_entries != candidate.declared_entries {
         d.push(
@@ -106,10 +144,16 @@ fn compare_index(
         );
     }
 
-    let control_entries: BTreeMap<_, _> =
-        control.entries.iter().map(|e| ((e.path.clone(), e.stage), e)).collect();
-    let candidate_entries: BTreeMap<_, _> =
-        candidate.entries.iter().map(|e| ((e.path.clone(), e.stage), e)).collect();
+    let control_entries: BTreeMap<_, _> = control
+        .entries
+        .iter()
+        .map(|e| ((e.path.clone(), e.stage), e))
+        .collect();
+    let candidate_entries: BTreeMap<_, _> = candidate
+        .entries
+        .iter()
+        .map(|e| ((e.path.clone(), e.stage), e))
+        .collect();
     let mut shown = 0usize;
     let mut extra = 0usize;
     for key in keys(&control_entries, &candidate_entries) {
@@ -151,10 +195,16 @@ fn compare_index(
         d.push(area, format!("and {extra} further entry differences"));
     }
 
-    let control_ext: BTreeMap<_, _> =
-        control.extensions.iter().map(|e| (e.signature.clone(), e)).collect();
-    let candidate_ext: BTreeMap<_, _> =
-        candidate.extensions.iter().map(|e| (e.signature.clone(), e)).collect();
+    let control_ext: BTreeMap<_, _> = control
+        .extensions
+        .iter()
+        .map(|e| (e.signature.clone(), e))
+        .collect();
+    let candidate_ext: BTreeMap<_, _> = candidate
+        .extensions
+        .iter()
+        .map(|e| (e.signature.clone(), e))
+        .collect();
     for key in keys(&control_ext, &candidate_ext) {
         match (control_ext.get(&key), candidate_ext.get(&key)) {
             (Some(a), Some(b)) => {
@@ -188,7 +238,10 @@ impl Collector<'_> {
         if control == candidate {
             return;
         }
-        self.push(area, format!("control {:?}, candidate {:?}", control, candidate));
+        self.push(
+            area,
+            format!("control {:?}, candidate {:?}", control, candidate),
+        );
     }
 
     /// Ordered comparison: position matters, as it does for the hook sequence.
@@ -229,7 +282,11 @@ impl Collector<'_> {
         let mut shown = 0usize;
         let mut extra = 0usize;
         for value in a.symmetric_difference(&b) {
-            let side = if a.contains(value) { "control" } else { "candidate" };
+            let side = if a.contains(value) {
+                "control"
+            } else {
+                "candidate"
+            };
             if shown < MAX_PER_AREA {
                 self.push(area, format!("only in {side}: {value:?}"));
                 shown += 1;
@@ -238,7 +295,10 @@ impl Collector<'_> {
             }
         }
         if extra > 0 {
-            self.push(area, format!("and {extra} further entries on one side only"));
+            self.push(
+                area,
+                format!("and {extra} further entries on one side only"),
+            );
         }
     }
 

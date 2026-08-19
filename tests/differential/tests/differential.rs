@@ -63,6 +63,9 @@ fn every_fixture_has_a_test() {
     let source = include_str!("differential.rs");
     for name in fixtures::ALL {
         let needle = format!("=> {name:?}");
-        assert!(source.contains(&needle), "fixture {name} has no test in the matrix");
+        assert!(
+            source.contains(&needle),
+            "fixture {name} has no test in the matrix"
+        );
     }
 }

@@ -47,7 +47,10 @@ fn random_repositories_and_flags_match_git() {
 }
 
 fn number(key: &str, fallback: u64) -> u64 {
-    std::env::var(key).ok().and_then(|v| v.parse().ok()).unwrap_or(fallback)
+    std::env::var(key)
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(fallback)
 }
 
 /// A cheap avalanche so consecutive seeds do not pick consecutive flag cases.

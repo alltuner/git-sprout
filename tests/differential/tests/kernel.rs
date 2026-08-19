@@ -52,7 +52,10 @@ fn kernel_worktree_matches_git() {
              existing shallow clone of torvalds/linux."
         );
     };
-    let cache = repo.parent().expect("the kernel clone has a parent directory").to_path_buf();
+    let cache = repo
+        .parent()
+        .expect("the kernel clone has a parent directory")
+        .to_path_buf();
     let workspace = Workspace::create("kernel").expect("scratch workspace");
     let tool = Tool::candidate();
     println!("kernel repository: {}", repo.display());
@@ -61,7 +64,11 @@ fn kernel_worktree_matches_git() {
     let case_insensitive = is_case_insensitive(&cache);
     println!(
         "destination volume is case-{}",
-        if case_insensitive { "insensitive" } else { "sensitive" }
+        if case_insensitive {
+            "insensitive"
+        } else {
+            "sensitive"
+        }
     );
 
     let control = run_side(&workspace, &cache, &repo, "control", &Tool::Git);
@@ -70,7 +77,12 @@ fn kernel_worktree_matches_git() {
 
     let candidate = run_side(&workspace, &cache, &repo, "candidate", &tool);
     check_kernel_facts(&workspace, &candidate, case_insensitive);
-    check_collision_winner(&workspace, &repo, &cache.join(DESTINATION), case_insensitive);
+    check_collision_winner(
+        &workspace,
+        &repo,
+        &cache.join(DESTINATION),
+        case_insensitive,
+    );
     cleanup(&workspace, &repo, &cache);
 
     let differences = compare::compare(&control, &candidate);
@@ -78,7 +90,11 @@ fn kernel_worktree_matches_git() {
         differences.is_empty(),
         "{} differences between git and the candidate on the kernel:\n  {}",
         differences.len(),
-        differences.iter().map(|d| d.to_string()).collect::<Vec<_>>().join("\n  ")
+        differences
+            .iter()
+            .map(|d| d.to_string())
+            .collect::<Vec<_>>()
+            .join("\n  ")
     );
 }
 
@@ -87,7 +103,9 @@ fn kernel_repo() -> Option<PathBuf> {
         let path = PathBuf::from(path);
         return path.join(".git").exists().then_some(path);
     }
-    let default = differential::fixtures::fixtures_dir().join("cache").join("linux");
+    let default = differential::fixtures::fixtures_dir()
+        .join("cache")
+        .join("linux");
     default.join(".git").exists().then_some(default)
 }
 
@@ -108,8 +126,11 @@ fn run_side(
     };
     run::install_hooks(&side.repo, &side.hook_log).expect("hooks");
 
-    let argv: Vec<String> =
-        vec![format!("../{DESTINATION}"), "-b".to_string(), BRANCH.to_string()];
+    let argv: Vec<String> = vec![
+        format!("../{DESTINATION}"),
+        "-b".to_string(),
+        BRANCH.to_string(),
+    ];
     let started = Instant::now();
     let output = run::worktree_add(workspace, &side, tool, &argv).expect("worktree add");
     let elapsed = started.elapsed();
@@ -185,12 +206,18 @@ fn check_collision_winner(
     }
     let upper_blob = run::git_line(workspace, repo, &["rev-parse", &format!("HEAD:{UPPER}")]);
     let lower_blob = run::git_line(workspace, repo, &["rev-parse", &format!("HEAD:{LOWER}")]);
-    assert_ne!(upper_blob, lower_blob, "the colliding pair should hold different blobs");
+    assert_ne!(
+        upper_blob, lower_blob,
+        "the colliding pair should hold different blobs"
+    );
 
     let on_disk = run::git_line(
         workspace,
         worktree,
-        &["hash-object", worktree.join(UPPER).to_string_lossy().as_ref()],
+        &[
+            "hash-object",
+            worktree.join(UPPER).to_string_lossy().as_ref(),
+        ],
     );
     assert_eq!(
         on_disk, lower_blob,
@@ -213,12 +240,21 @@ fn cleanup(workspace: &Workspace, repo: &Path, cache: &Path) {
     let _ = run::git_full(
         workspace,
         repo,
-        &["worktree", "remove", "--force", dest.to_string_lossy().as_ref()],
+        &[
+            "worktree",
+            "remove",
+            "--force",
+            dest.to_string_lossy().as_ref(),
+        ],
     );
     let _ = differential::env::remove_tree(&dest);
     let _ = run::git_full(workspace, repo, &["worktree", "prune"]);
     let _ = run::git_full(workspace, repo, &["branch", "-D", BRANCH]);
-    for hook in ["reference-transaction", "post-index-change", "post-checkout"] {
+    for hook in [
+        "reference-transaction",
+        "post-index-change",
+        "post-checkout",
+    ] {
         let _ = std::fs::remove_file(repo.join(".git").join("hooks").join(hook));
     }
 }

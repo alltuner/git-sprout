@@ -40,7 +40,10 @@ fn every_injection_is_detected() {
     let mut table: Vec<String> = Vec::new();
 
     for injection in inject::ALL {
-        match runner.run(&template, flags, Some(*injection)).expect("case run") {
+        match runner
+            .run(&template, flags, Some(*injection))
+            .expect("case run")
+        {
             Outcome::NotApplicable(reason) => {
                 skipped.push(format!("{}: {reason}", injection.name()));
             }
@@ -55,8 +58,7 @@ fn every_injection_is_detected() {
                 }
                 let expected = injection.expected_area();
                 let areas: Vec<&str> = {
-                    let mut areas: Vec<&str> =
-                        result.differences.iter().map(|d| d.area).collect();
+                    let mut areas: Vec<&str> = result.differences.iter().map(|d| d.area).collect();
                     areas.dedup();
                     areas
                 };
@@ -77,7 +79,11 @@ fn every_injection_is_detected() {
         }
     }
 
-    println!("injections detected ({} of {}):", table.len(), inject::ALL.len());
+    println!(
+        "injections detected ({} of {}):",
+        table.len(),
+        inject::ALL.len()
+    );
     for line in &table {
         println!("{line}");
     }

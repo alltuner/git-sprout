@@ -81,12 +81,15 @@ pub fn parse(data: &[u8], oid_len: usize) -> IndexFacts {
         return facts;
     }
     if &data[0..4] != b"DIRC" {
-        facts.parse_error = Some(format!("bad signature {:?}", String::from_utf8_lossy(&data[0..4])));
+        facts.parse_error = Some(format!(
+            "bad signature {:?}",
+            String::from_utf8_lossy(&data[0..4])
+        ));
         return facts;
     }
     facts.version = be32(&data[4..8]);
     facts.declared_entries = be32(&data[8..12]);
-    if !matches!(facts.version, 2 | 3 | 4) {
+    if !matches!(facts.version, 2..=4) {
         facts.parse_error = Some(format!("unsupported index version {}", facts.version));
         return facts;
     }
@@ -118,8 +121,9 @@ pub fn parse(data: &[u8], oid_len: usize) -> IndexFacts {
         let end = match start.checked_add(size as usize) {
             Some(end) if end <= body_end => end,
             _ => {
-                facts.parse_error =
-                    Some(format!("extension {signature} claims {size} bytes past end of index"));
+                facts.parse_error = Some(format!(
+                    "extension {signature} claims {size} bytes past end of index"
+                ));
                 return facts;
             }
         };
@@ -128,12 +132,18 @@ pub fn parse(data: &[u8], oid_len: usize) -> IndexFacts {
         } else {
             None
         };
-        facts.extensions.push(IndexExtension { signature, size, digest });
+        facts.extensions.push(IndexExtension {
+            signature,
+            size,
+            digest,
+        });
         pos = end;
     }
     if pos != body_end {
-        facts.parse_error =
-            Some(format!("{} trailing bytes after the extension chain", body_end - pos));
+        facts.parse_error = Some(format!(
+            "{} trailing bytes after the extension chain",
+            body_end - pos
+        ));
     }
     facts
 }

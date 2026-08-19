@@ -76,7 +76,10 @@ pub fn discover() -> std::io::Result<Vec<String>> {
 pub fn build(workspace: &Workspace, name: &str, dest: &Path) -> std::io::Result<Built> {
     let script = script_for(name);
     if !script.is_file() {
-        return Ok(Built::Skipped(format!("no builder at {}", script.display())));
+        return Ok(Built::Skipped(format!(
+            "no builder at {}",
+            script.display()
+        )));
     }
     std::fs::create_dir_all(dest)?;
     let mut cmd = Command::new("sh");
@@ -108,12 +111,17 @@ pub fn build_random(workspace: &Workspace, dest: &Path, seed: u64) -> std::io::R
     let script = fixtures_dir().join("random.sh");
     std::fs::create_dir_all(dest)?;
     let mut cmd = Command::new("sh");
-    cmd.arg(&script).arg(dest).arg(seed.to_string()).stdin(Stdio::null());
+    cmd.arg(&script)
+        .arg(dest)
+        .arg(seed.to_string())
+        .stdin(Stdio::null());
     workspace.apply(&mut cmd);
     let out = cmd.output()?;
     let code = crate::run::exit_code(&out.status);
     if code == SKIP_STATUS {
-        return Ok(Built::Skipped(String::from_utf8_lossy(&out.stderr).trim().to_string()));
+        return Ok(Built::Skipped(
+            String::from_utf8_lossy(&out.stderr).trim().to_string(),
+        ));
     }
     if code != 0 {
         return Err(std::io::Error::other(format!(

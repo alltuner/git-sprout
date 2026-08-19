@@ -88,7 +88,6 @@ jobs:
         env:
           SPROUT_TEST_TMPDIR: /mnt/fsimage/scratch
         run: |
-          echo "SPROUT_BIN=$PWD/target/release/git-sprout" >> "$GITHUB_ENV"
           SPROUT_BIN=$PWD/target/release/git-sprout \
             cargo test --release --manifest-path $MANIFEST -- --nocapture
 
@@ -107,12 +106,12 @@ jobs:
       - name: Create and format a ReFS volume
         shell: pwsh
         run: |
-          $script = @"
-          create vdisk file=C:\refs.vhdx maximum=20480 type=expandable
-          attach vdisk
-          create partition primary
-          assign letter=R
-          "@
+          $script = @(
+            'create vdisk file=C:\refs.vhdx maximum=20480 type=expandable',
+            'attach vdisk',
+            'create partition primary',
+            'assign letter=R'
+          )
           $script | Out-File -Encoding ascii diskpart.txt
           diskpart /s diskpart.txt
           Format-Volume -DriveLetter R -FileSystem ReFS -NewFileSystemLabel refs -Confirm:$false -Force

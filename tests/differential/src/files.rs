@@ -18,8 +18,9 @@ pub fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {
     }
     if meta.is_dir() {
         std::fs::create_dir_all(to)?;
-        let mut entries: Vec<PathBuf> =
-            std::fs::read_dir(from)?.map(|e| e.map(|e| e.path())).collect::<Result<_, _>>()?;
+        let mut entries: Vec<PathBuf> = std::fs::read_dir(from)?
+            .map(|e| e.map(|e| e.path()))
+            .collect::<Result<_, _>>()?;
         entries.sort();
         for entry in entries {
             let name = entry.file_name().expect("directory entry has a name");
@@ -49,7 +50,10 @@ fn copy_permissions(meta: &std::fs::Metadata, to: &Path) -> std::io::Result<()> 
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(to, std::fs::Permissions::from_mode(meta.permissions().mode()))?;
+        std::fs::set_permissions(
+            to,
+            std::fs::Permissions::from_mode(meta.permissions().mode()),
+        )?;
     }
     #[cfg(not(unix))]
     {
@@ -83,8 +87,9 @@ pub fn walk(root: &Path) -> std::io::Result<Vec<PathBuf>> {
 
 fn walk_into(root: &Path, relative: &Path, out: &mut Vec<PathBuf>) -> std::io::Result<()> {
     let dir = root.join(relative);
-    let mut entries: Vec<_> =
-        std::fs::read_dir(&dir)?.map(|e| e.map(|e| e.file_name())).collect::<Result<_, _>>()?;
+    let mut entries: Vec<_> = std::fs::read_dir(&dir)?
+        .map(|e| e.map(|e| e.file_name()))
+        .collect::<Result<_, _>>()?;
     entries.sort();
     for name in entries {
         let child = relative.join(&name);

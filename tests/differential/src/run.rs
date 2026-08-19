@@ -7,7 +7,11 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 /// Hooks git fires during a worktree add, per the semantics probe against git 2.55.0.
-const LOGGED_HOOKS: &[&str] = &["reference-transaction", "post-index-change", "post-checkout"];
+const LOGGED_HOOKS: &[&str] = &[
+    "reference-transaction",
+    "post-index-change",
+    "post-checkout",
+];
 
 /// Which implementation materialises the worktree on a given side.
 #[derive(Debug, Clone, PartialEq, Eq)]

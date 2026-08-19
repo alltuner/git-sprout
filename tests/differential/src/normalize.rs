@@ -17,7 +17,14 @@ impl Normaliser {
         let mut replacements: Vec<(Vec<u8>, &'static str)> = Vec::new();
         for (path, token) in [(side_root, "<SIDE>"), (workspace_root, "<WORKSPACE>")] {
             for variant in path_variants(path) {
-                replacements.push((variant.as_os_str().to_string_lossy().into_owned().into_bytes(), token));
+                replacements.push((
+                    variant
+                        .as_os_str()
+                        .to_string_lossy()
+                        .into_owned()
+                        .into_bytes(),
+                    token,
+                ));
                 let slashed = variant.to_string_lossy().replace('\\', "/");
                 replacements.push((slashed.into_bytes(), token));
             }

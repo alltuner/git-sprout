@@ -66,6 +66,10 @@ fn the_run_reports_which_path_it_took() {
     println!("candidate: {}", runner.tool().describe());
     println!("scratch root: {}", runner.workspace().root().display());
     if let Tool::Sprout(bin) = runner.tool() {
-        assert!(bin.is_file(), "SPROUT_BIN does not point at a file: {}", bin.display());
+        assert!(
+            bin.is_file(),
+            "SPROUT_BIN does not point at a file: {}",
+            bin.display()
+        );
     }
 }

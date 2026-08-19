@@ -13,12 +13,22 @@ use std::path::Path;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TreeEntry {
-    Dir { mode: u32 },
-    Symlink { target: String },
-    File { mode: u32, size: u64, digest: String },
+    Dir {
+        mode: u32,
+    },
+    Symlink {
+        target: String,
+    },
+    File {
+        mode: u32,
+        size: u64,
+        digest: String,
+    },
     /// A `.git` pointer file: compared as normalised text rather than as bytes,
     /// because it names the absolute path of the side it belongs to.
-    GitPointer { content: String },
+    GitPointer {
+        content: String,
+    },
 }
 
 impl TreeEntry {
@@ -98,7 +108,11 @@ pub fn capture(
         stdout: norm.text(&output.stdout),
         stderr: norm.stderr(&output.stderr),
         status: output.status,
-        hooks: output.hooks.iter().map(|h| norm.text(h.as_bytes())).collect(),
+        hooks: output
+            .hooks
+            .iter()
+            .map(|h| norm.text(h.as_bytes()))
+            .collect(),
         stats: output.stats,
         worktree_exists,
         tree: BTreeMap::new(),
@@ -120,7 +134,10 @@ pub fn capture(
         snapshot.refs = lines(&run::git(
             workspace,
             &side.repo,
-            &["for-each-ref", "--format=%(refname) %(objectname) %(objecttype)"],
+            &[
+                "for-each-ref",
+                "--format=%(refname) %(objectname) %(objecttype)",
+            ],
         )?);
         snapshot.worktree_list = lines(&run::git(
             workspace,
@@ -151,8 +168,15 @@ pub fn capture(
         entries.sort();
         entries
     };
-    snapshot.head = run::git_line(workspace, &side.worktree, &["rev-parse", "HEAD"]);
-    snapshot.head_reflog_entry = run::git_line(workspace, &side.worktree, &["rev-parse", "HEAD@{0}"]);
+    // One call for both: git resolves each argument in turn, so the two lines come
+    // back in order and the process spawn is paid once instead of twice.
+    let resolved = lines(&run::git(
+        workspace,
+        &side.worktree,
+        &["rev-parse", "HEAD", "HEAD@{0}"],
+    )?);
+    snapshot.head = resolved.first().cloned().unwrap_or_default();
+    snapshot.head_reflog_entry = resolved.get(1).cloned().unwrap_or_default();
     snapshot.reflog = lines(&run::git(
         workspace,
         &side.worktree,
@@ -163,8 +187,11 @@ pub fn capture(
         &side.worktree,
         &["ls-files", "--stage", "-z"],
     )?);
-    snapshot.ls_files_flags =
-        nul_lines(&run::git(workspace, &side.worktree, &["ls-files", "-v", "-z"])?);
+    snapshot.ls_files_flags = nul_lines(&run::git(
+        workspace,
+        &side.worktree,
+        &["ls-files", "-v", "-z"],
+    )?);
 
     let name = side
         .worktree
@@ -188,8 +215,11 @@ pub fn capture(
         snapshot.shared_index = shared.first().map(|p| index::read(p, object_format));
     }
     // A parse failure names the file it failed on, which is a per-side path.
-    snapshot.index.parse_error =
-        snapshot.index.parse_error.as_ref().map(|e| norm.text(e.as_bytes()));
+    snapshot.index.parse_error = snapshot
+        .index
+        .parse_error
+        .as_ref()
+        .map(|e| norm.text(e.as_bytes()));
     if let Some(shared) = snapshot.shared_index.as_mut() {
         shared.parse_error = shared.parse_error.as_ref().map(|e| norm.text(e.as_bytes()));
     }
@@ -204,12 +234,18 @@ fn capture_tree(root: &Path, norm: &Normaliser) -> std::io::Result<BTreeMap<Stri
         let key = relative.to_string_lossy().replace('\\', "/");
         let entry = if meta.file_type().is_symlink() {
             TreeEntry::Symlink {
-                target: std::fs::read_link(&path)?.to_string_lossy().replace('\\', "/"),
+                target: std::fs::read_link(&path)?
+                    .to_string_lossy()
+                    .replace('\\', "/"),
             }
         } else if meta.is_dir() {
-            TreeEntry::Dir { mode: mode_of(&meta) }
+            TreeEntry::Dir {
+                mode: mode_of(&meta),
+            }
         } else if relative.file_name().is_some_and(|n| n == ".git") {
-            TreeEntry::GitPointer { content: norm.text(&std::fs::read(&path)?) }
+            TreeEntry::GitPointer {
+                content: norm.text(&std::fs::read(&path)?),
+            }
         } else {
             TreeEntry::File {
                 mode: mode_of(&meta),
@@ -240,7 +276,9 @@ fn capture_admin(dir: &Path, norm: &Normaliser) -> std::io::Result<BTreeMap<Stri
             match String::from_utf8(norm.bytes(&bytes)) {
                 Ok(text) => {
                     let text = if key.starts_with("logs/") {
-                        text.lines().map(|l| format!("{}\n", normalize::reflog_line(l))).collect()
+                        text.lines()
+                            .map(|l| format!("{}\n", normalize::reflog_line(l)))
+                            .collect()
                     } else {
                         text
                     };
@@ -289,7 +327,10 @@ fn mode_of(meta: &std::fs::Metadata) -> u32 {
 }
 
 fn lines(bytes: &[u8]) -> Vec<String> {
-    String::from_utf8_lossy(bytes).lines().map(str::to_string).collect()
+    String::from_utf8_lossy(bytes)
+        .lines()
+        .map(str::to_string)
+        .collect()
 }
 
 fn nul_lines(bytes: &[u8]) -> Vec<String> {

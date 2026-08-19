@@ -110,8 +110,14 @@ impl Workspace {
         };
         set("HOME", &self.home.to_string_lossy());
         set("XDG_CONFIG_HOME", &self.home.join("xdg").to_string_lossy());
-        set("GIT_CONFIG_GLOBAL", &self.home.join("gitconfig").to_string_lossy());
-        set("GIT_CONFIG_SYSTEM", &self.home.join("nonexistent-system").to_string_lossy());
+        set(
+            "GIT_CONFIG_GLOBAL",
+            &self.home.join("gitconfig").to_string_lossy(),
+        );
+        set(
+            "GIT_CONFIG_SYSTEM",
+            &self.home.join("nonexistent-system").to_string_lossy(),
+        );
         set("GIT_CONFIG_NOSYSTEM", "1");
         set("GIT_AUTHOR_NAME", FIXED_NAME);
         set("GIT_AUTHOR_EMAIL", FIXED_EMAIL);
@@ -189,6 +195,12 @@ fn chmod_writable(path: &Path) {
 
 fn sanitise(name: &str) -> String {
     name.chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '-' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '-'
+            }
+        })
         .collect()
 }

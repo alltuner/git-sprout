@@ -10,6 +10,8 @@ use crate::inject::{Applied, Injection};
 use crate::run::{self, Side, Tool};
 use crate::snapshot::{self, Snapshot};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Mutex;
 
 /// A fixture repository built once and copied per case.
 pub struct Template {
@@ -28,7 +30,7 @@ pub struct CaseResult {
 }
 
 pub enum Outcome {
-    Ran(CaseResult),
+    Ran(Box<CaseResult>),
     /// The injection this case asked for does not apply to this fixture.
     NotApplicable(String),
 }
@@ -40,7 +42,10 @@ pub struct Runner {
 
 impl Runner {
     pub fn new(label: &str) -> std::io::Result<Runner> {
-        Ok(Runner { workspace: Workspace::create(label)?, tool: Tool::candidate() })
+        Ok(Runner {
+            workspace: Workspace::create(label)?,
+            tool: Tool::candidate(),
+        })
     }
 
     pub fn tool(&self) -> &Tool {
@@ -54,23 +59,41 @@ impl Runner {
     /// A template built from the seeded random generator rather than a named builder.
     pub fn random_template(&self, seed: u64) -> std::io::Result<Template> {
         let name = format!("random-{seed}");
-        let repo = self.workspace.root().join("templates").join(&name).join("repo");
+        let repo = self
+            .workspace
+            .root()
+            .join("templates")
+            .join(&name)
+            .join("repo");
         let _ = crate::env::remove_tree(&repo);
         let skipped = match fixtures::build_random(&self.workspace, &repo, seed)? {
             Built::Ok => None,
             Built::Skipped(reason) => Some(reason),
         };
-        Ok(Template { name, repo, skipped })
+        Ok(Template {
+            name,
+            repo,
+            skipped,
+        })
     }
 
     pub fn template(&self, fixture: &str) -> std::io::Result<Template> {
-        let repo = self.workspace.root().join("templates").join(fixture).join("repo");
+        let repo = self
+            .workspace
+            .root()
+            .join("templates")
+            .join(fixture)
+            .join("repo");
         let _ = crate::env::remove_tree(&repo);
         let skipped = match fixtures::build(&self.workspace, fixture, &repo)? {
             Built::Ok => None,
             Built::Skipped(reason) => Some(reason),
         };
-        Ok(Template { name: fixture.to_string(), repo, skipped })
+        Ok(Template {
+            name: fixture.to_string(),
+            repo,
+            skipped,
+        })
     }
 
     /// Runs one comparison. `injection` corrupts the candidate side on purpose and
@@ -118,19 +141,23 @@ impl Runner {
         let object_format = snapshot::object_format(&self.workspace, &control.repo);
         let control_snapshot =
             snapshot::capture(&self.workspace, &control, control_output, &object_format)?;
-        let candidate_snapshot =
-            snapshot::capture(&self.workspace, &candidate, candidate_output, &object_format)?;
+        let candidate_snapshot = snapshot::capture(
+            &self.workspace,
+            &candidate,
+            candidate_output,
+            &object_format,
+        )?;
 
         let differences = compare::compare(&control_snapshot, &candidate_snapshot);
         if differences.is_empty() {
             self.workspace.release_case(&case_dir);
         }
-        Ok(Outcome::Ran(CaseResult {
+        Ok(Outcome::Ran(Box::new(CaseResult {
             differences,
             control: control_snapshot,
             candidate: candidate_snapshot,
             case_dir,
-        }))
+        })))
     }
 }
 
@@ -152,6 +179,10 @@ pub fn report(fixture: &str, flags: &FlagCase, tool: &Tool, result: &CaseResult)
 /// Runs every flag case in `cases` against one fixture and panics with a full
 /// report if any of them diverged. Collecting all failures first is deliberate: the
 /// first divergence is rarely the most informative one.
+///
+/// Cases run on a small pool of their own threads. Almost all of the wall clock is
+/// spent waiting on git subprocesses, so the pool is deliberately wider than the
+/// core count; `SPROUT_CASE_THREADS` overrides it.
 pub fn check_fixture(fixture: &str, cases: &[&FlagCase]) {
     let runner = Runner::new(fixture).expect("scratch workspace");
     let template = runner.template(fixture).expect("fixture builder");
@@ -160,17 +191,35 @@ pub fn check_fixture(fixture: &str, cases: &[&FlagCase]) {
         return;
     }
 
-    let mut failures: Vec<String> = Vec::new();
-    for flags in cases {
-        match runner.run(&template, flags, None).expect("case run") {
-            Outcome::NotApplicable(_) => {}
-            Outcome::Ran(result) => {
-                if !result.differences.is_empty() {
-                    failures.push(report(fixture, flags, runner.tool(), &result));
+    let next = AtomicUsize::new(0);
+    let failures = Mutex::new(Vec::<String>::new());
+    let workers = case_threads().min(cases.len().max(1));
+    std::thread::scope(|scope| {
+        for _ in 0..workers {
+            scope.spawn(|| loop {
+                let index = next.fetch_add(1, Ordering::SeqCst);
+                let Some(flags) = cases.get(index) else {
+                    return;
+                };
+                match runner.run(&template, flags, None).expect("case run") {
+                    Outcome::NotApplicable(_) => {}
+                    Outcome::Ran(result) => {
+                        if !result.differences.is_empty() {
+                            failures.lock().expect("failure list").push(report(
+                                fixture,
+                                flags,
+                                runner.tool(),
+                                &result,
+                            ));
+                        }
+                    }
                 }
-            }
+            });
         }
-    }
+    });
+
+    let mut failures = failures.into_inner().expect("failure list");
+    failures.sort();
     assert!(
         failures.is_empty(),
         "{} of {} flag cases diverged for fixture {fixture}:{}",
@@ -178,6 +227,14 @@ pub fn check_fixture(fixture: &str, cases: &[&FlagCase]) {
         cases.len(),
         failures.join("")
     );
+}
+
+fn case_threads() -> usize {
+    std::env::var("SPROUT_CASE_THREADS")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .filter(|n| *n > 0)
+        .unwrap_or(4)
 }
 
 /// Every flag case, for the per-fixture tests.
@@ -188,5 +245,8 @@ pub fn all_cases() -> Vec<&'static FlagCase> {
 /// The short flag matrix, for fixtures where the full one only repeats what the
 /// plain repository already proved.
 pub fn core_cases() -> Vec<&'static FlagCase> {
-    crate::flags::CORE.iter().filter_map(|n| crate::flags::by_name(n)).collect()
+    crate::flags::CORE
+        .iter()
+        .filter_map(|n| crate::flags::by_name(n))
+        .collect()
 }

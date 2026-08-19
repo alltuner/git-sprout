@@ -46,31 +46,86 @@ pub const ALL: &[FlagCase] = &[
     case!("reset-branch", "wt", ["../wt", "-B", "existing"]),
     case!("detach", "wt", ["--detach", "../wt"]),
     case!("detach-parent", "wt", ["--detach", "../wt", "HEAD~1"]),
-    case!("no-checkout", "wt", ["../wt", "--no-checkout", "-b", "nocheckout"]),
-    case!("checkout", "wt", ["../wt", "--checkout", "-b", "withcheckout"]),
+    case!(
+        "no-checkout",
+        "wt",
+        ["../wt", "--no-checkout", "-b", "nocheckout"]
+    ),
+    case!(
+        "checkout",
+        "wt",
+        ["../wt", "--checkout", "-b", "withcheckout"]
+    ),
     case!("lock", "wt", ["../wt", "--lock", "-b", "locked"]),
-    case!("lock-reason", "wt", ["../wt", "--lock", "--reason", "held by the suite", "-b", "lockedwhy"]),
+    case!(
+        "lock-reason",
+        "wt",
+        [
+            "../wt",
+            "--lock",
+            "--reason",
+            "held by the suite",
+            "-b",
+            "lockedwhy"
+        ]
+    ),
     case!("quiet", "wt", ["-q", "../wt", "-b", "quiet"]),
     case!("force", "wt", ["-f", "../wt", "-b", "forced"]),
     case!("orphan", "wt", ["--orphan", "-b", "orphaned", "../wt"]),
     case!("orphan-no-branch", "wt", ["--orphan", "../wt"]),
     case!("commit-ish-head", "wt", ["../wt", "-b", "athead", "HEAD"]),
-    case!("commit-ish-parent", "wt", ["../wt", "-b", "atparent", "HEAD~1"]),
+    case!(
+        "commit-ish-parent",
+        "wt",
+        ["../wt", "-b", "atparent", "HEAD~1"]
+    ),
     case!("commit-ish-tag", "wt", ["../wt", "-b", "attag", "v1"]),
     case!("detach-tag", "wt", ["--detach", "../wt", "v1"]),
-    case!("track-remote", "wt", ["--track", "-b", "tracked", "../wt", "origin/main"]),
-    case!("no-track-remote", "wt", ["--no-track", "-b", "untracked", "../wt", "origin/main"]),
+    case!(
+        "track-remote",
+        "wt",
+        ["--track", "-b", "tracked", "../wt", "origin/main"]
+    ),
+    case!(
+        "no-track-remote",
+        "wt",
+        ["--no-track", "-b", "untracked", "../wt", "origin/main"]
+    ),
     case!("guess-remote", "topic", ["--guess-remote", "../topic"]),
-    case!("no-guess-remote", "topic", ["--no-guess-remote", "../topic"]),
-    case!("relative-paths", "wt", ["../wt", "-b", "relative", "--relative-paths"]),
+    case!(
+        "no-guess-remote",
+        "topic",
+        ["--no-guess-remote", "../topic"]
+    ),
+    case!(
+        "relative-paths",
+        "wt",
+        ["../wt", "-b", "relative", "--relative-paths"]
+    ),
     case!("branch-collision", "wt", ["../wt", "-b", "existing"]),
-    case!("unknown-commit-ish", "wt", ["../wt", "no-such-ref-anywhere"]),
-    case!("destination-exists", "wt", ["../wt"], Setup::OccupyDestination),
+    case!(
+        "unknown-commit-ish",
+        "wt",
+        ["../wt", "no-such-ref-anywhere"]
+    ),
+    case!(
+        "destination-exists",
+        "wt",
+        ["../wt"],
+        Setup::OccupyDestination
+    ),
 ];
 
 /// A short matrix for the property test and for fixtures where the full matrix
 /// would only repeat what the plain repository already proved.
-pub const CORE: &[&str] = &["default", "new-branch", "detach", "no-checkout", "commit-ish-tag", "quiet"];
+pub const CORE: &[&str] = &[
+    "default",
+    "new-branch",
+    "detach",
+    "no-checkout",
+    "commit-ish-tag",
+    "quiet",
+];
 
 pub fn by_name(name: &str) -> Option<&'static FlagCase> {
     ALL.iter().find(|c| c.name == name)

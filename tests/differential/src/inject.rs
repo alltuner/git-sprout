@@ -100,7 +100,9 @@ impl Injection {
             Injection::RewriteGitPointer => "the worktree's .git pointer names another admin dir",
             Injection::ChangeIndexVersion => "the index is written as version 3 instead of 2",
             Injection::ChangeIndexEntryOid => "an index entry records the wrong blob oid",
-            Injection::ChangeIndexEntryMode => "an index entry records mode 100755 instead of 100644",
+            Injection::ChangeIndexEntryMode => {
+                "an index entry records mode 100755 instead of 100644"
+            }
             Injection::ChangeIndexEntryCount => "the index header declares one entry fewer",
             Injection::RemoveIndexExtensions => "the index is written without its extensions",
             Injection::SuppressHeadLine => "the `HEAD is now at` stdout line is missing",
@@ -160,7 +162,10 @@ impl Injection {
                     return Ok(Applied::NotApplicable("no .git pointer file".into()));
                 }
                 let text = std::fs::read_to_string(&pointer)?;
-                std::fs::write(&pointer, text.replace("worktrees/", "worktrees/../worktrees/"))?;
+                std::fs::write(
+                    &pointer,
+                    text.replace("worktrees/", "worktrees/../worktrees/"),
+                )?;
                 Ok(Applied::Yes)
             }
             Injection::ChangeIndexVersion => patch_index(workspace, side, |data| {
@@ -194,9 +199,11 @@ impl Injection {
                 true
             }),
             Injection::RemoveIndexExtensions => remove_index_extensions(workspace, side),
-            Injection::SuppressHeadLine => {
-                suppress_line(&mut output.stdout, "HEAD is now at ", "no `HEAD is now at` line")
-            }
+            Injection::SuppressHeadLine => suppress_line(
+                &mut output.stdout,
+                "HEAD is now at ",
+                "no `HEAD is now at` line",
+            ),
             Injection::SuppressPreparingLine => suppress_line(
                 &mut output.stderr,
                 "Preparing worktree ",
@@ -259,7 +266,9 @@ fn tracked_regular_file(workspace: &Workspace, side: &Side) -> std::io::Result<O
 
 fn flip_file_byte(workspace: &Workspace, side: &Side) -> std::io::Result<Applied> {
     let Some(path) = tracked_regular_file(workspace, side)? else {
-        return Ok(Applied::NotApplicable("no non-empty tracked regular file".into()));
+        return Ok(Applied::NotApplicable(
+            "no non-empty tracked regular file".into(),
+        ));
     };
     let mut bytes = std::fs::read(&path)?;
     bytes[0] ^= 0x20;
@@ -277,19 +286,25 @@ fn set_executable_bit(workspace: &Workspace, side: &Side) -> std::io::Result<App
             let Ok(meta) = std::fs::symlink_metadata(&path) else {
                 continue;
             };
-            if meta.is_file() && !meta.file_type().is_symlink() && meta.permissions().mode() & 0o111 == 0
+            if meta.is_file()
+                && !meta.file_type().is_symlink()
+                && meta.permissions().mode() & 0o111 == 0
             {
                 let mode = meta.permissions().mode() | 0o111;
                 std::fs::set_permissions(&path, std::fs::Permissions::from_mode(mode))?;
                 return Ok(Applied::Yes);
             }
         }
-        Ok(Applied::NotApplicable("no non-executable tracked file".into()))
+        Ok(Applied::NotApplicable(
+            "no non-executable tracked file".into(),
+        ))
     }
     #[cfg(not(unix))]
     {
         let _ = (workspace, side);
-        Ok(Applied::NotApplicable("this platform has no executable bit".into()))
+        Ok(Applied::NotApplicable(
+            "this platform has no executable bit".into(),
+        ))
     }
 }
 
@@ -304,7 +319,9 @@ fn symlink_to_regular(side: &Side) -> std::io::Result<Applied> {
             return Ok(Applied::Yes);
         }
     }
-    Ok(Applied::NotApplicable("the worktree contains no symlink".into()))
+    Ok(Applied::NotApplicable(
+        "the worktree contains no symlink".into(),
+    ))
 }
 
 fn remove_checked_out_file(workspace: &Workspace, side: &Side) -> std::io::Result<Applied> {
@@ -317,7 +334,12 @@ fn remove_checked_out_file(workspace: &Workspace, side: &Side) -> std::io::Resul
 
 fn admin_index(side: &Side) -> Option<PathBuf> {
     let name = side.worktree.file_name()?;
-    let path = side.repo.join(".git").join("worktrees").join(name).join("index");
+    let path = side
+        .repo
+        .join(".git")
+        .join("worktrees")
+        .join(name)
+        .join("index");
     path.is_file().then_some(path)
 }
 
@@ -341,9 +363,11 @@ fn patch_index(
     let body_len = data.len() - hash_len;
     let mut body = data[..body_len].to_vec();
     if !edit(&mut body) {
-        return Ok(Applied::NotApplicable("the index does not hold what this needs".into()));
+        return Ok(Applied::NotApplicable(
+            "the index does not hold what this needs".into(),
+        ));
     }
-    data.truncate(0);
+    data.clear();
     data.extend_from_slice(&body);
     data.extend_from_slice(&checksum(&body, &object_format));
     std::fs::write(&path, &data)?;
@@ -358,11 +382,12 @@ fn remove_index_extensions(workspace: &Workspace, side: &Side) -> std::io::Resul
     let data = std::fs::read(&path)?;
     let facts = crate::index::read(&path, &object_format);
     if facts.extensions.is_empty() {
-        return Ok(Applied::NotApplicable("the index carries no extensions".into()));
+        return Ok(Applied::NotApplicable(
+            "the index carries no extensions".into(),
+        ));
     }
     let hash_len = crate::index::oid_len(&object_format);
-    let extension_bytes: usize =
-        facts.extensions.iter().map(|e| e.size as usize + 8).sum();
+    let extension_bytes: usize = facts.extensions.iter().map(|e| e.size as usize + 8).sum();
     let end = data.len() - hash_len - extension_bytes;
     let body = data[..end].to_vec();
     let mut out = body.clone();
