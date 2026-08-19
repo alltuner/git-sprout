@@ -200,121 +200,84 @@ rather than a large number when the divisor is under 0.005.
 
 ## Marker convention — read this before editing the site or the README
 
-`render-site-numbers.py` rewrites figures **in place, between explicit markers**. The
-same convention works in HTML and in Markdown, because HTML comments are inert in
-both.
-
-### 1. Span markers — for a figure in the text
+`render-site-numbers.py` rewrites figures **in place, between explicit markers**. One
+syntax, identical in HTML and Markdown, because HTML comments are inert in both:
 
 ```html
-<!--bench:kernel.git.disk_mb-->1805 MB<!--/bench-->
+<!--bench:kernel.disk.git-->1814 MB<!--/bench-->
 ```
 
 The opener names the key; the closer is always the literal `<!--/bench-->`. Whatever
-sits between them is replaced. Nesting is not supported. Identical syntax in
-Markdown:
+sits between them is replaced. Nesting is not supported.
 
-```markdown
-| **<!--bench:kernel.label-->…<!--/bench-->** | <!--bench:kernel.git.summary-->…<!--/bench--> |
+**Names are `scenario.metric.side`.** Units are not in the name — they live in the
+`units` block of `bench.json`, and the rendered text carries the unit string.
+
+### The complete catalogue — 30 names
+
+| name | renders as |
+| --- | --- |
+| `kernel.time.git` / `kernel.time.sprout` | `11.13s` |
+| `kernel.disk.git` / `kernel.disk.sprout` | `1814 MB` |
+| `kernel.disk.git.round` | `1.8 GB` — derived |
+| `kernel.disk.ratio` | `42x` — derived |
+| `kernel.disk.saved` | `1.7 GB` — derived, git minus sprout |
+| `kernel.files` | `95 056` |
+| `kernel.bytes` | `1.5 GB` — working tree, excluding `.git` |
+| `medium.time.git` / `.sprout`, `medium.disk.git` / `.sprout` | the 250 MB / 2000 files row |
+| `cross.time.git` / `.sprout`, `cross.disk.git` / `.sprout` | the 188 MB source-behind row |
+| `btrfs.time.git` / `.sprout`, `btrfs.disk.git` / `.sprout` | the btrfs row |
+| `btrfs.du` | the verbatim `btrfs filesystem du` block |
+| `ext4.time.git`, `ext4.disk.git` | the fallback row; it has no tool column |
+| `fleet.disk.git` / `fleet.disk.sprout` | `88.6 GB` — derived, 50 worktrees |
+| `chart.bar.git` / `chart.bar.sprout` | SVG bar geometry, derived from the kernel disk figures |
+| `env.macos` | `Apple M2, 8 cores, macOS 26.6.1, git 2.55.0` |
+| `env.linux` | `kernel 7.0.12-linuxkit, git 2.47.3, loopback btrfs and ext4` |
+
+Four are not plain numbers:
+
+- **`btrfs.du`** is a multi-line block, captured verbatim from the filesystem and
+  HTML-escaped when it lands in an `.html` target, left raw in Markdown.
+- **`chart.bar.git` / `chart.bar.sprout`** wrap the site's own `<rect>`. The renderer
+  rewrites only the `width` attribute and leaves the classes and the rest of the
+  markup alone, so the chart's appearance stays the site's business and its length
+  stays the report's. Widths are a fraction of a 1000-unit viewBox, derived from the
+  kernel disk figures, so the bars can never disagree with the table above them.
+- **`env.macos` / `env.linux`** are machine descriptions, taken from the `machine`
+  block of the scenarios each one actually measured.
+
+The `no-match` scenario is measured for the worst-case budget in spec §9 and has no
+name here on purpose: it is not a row on the page.
+
+### The self-check, in both directions
+
+Every marker on a page must have a value in the report, **and** every name in the
+catalogue must appear on a page. A name the report cannot fill is a broken figure; a
+name no page carries is a figure that quietly stopped being regenerated. Both fail the
+run. This is the same check as:
+
+```bash
+grep -oh '<!--bench:[a-z0-9._-]*-->' docs/index.html README.md \
+  | sed 's/<!--bench://;s/-->//' | sort -u
 ```
 
-### 2. Attribute markers — for SVG geometry
+`./bench/render-site-numbers.py --check` runs it and writes nothing;
+`--print-keys` dumps every name with its current value.
 
-An element carrying `data-bench-<attribute>="<key>"` gets that attribute rewritten:
+### Optional: region markers
 
-```html
-<rect data-bench-width="kernel.git.disk_pct" width="100%" y="0" height="24"/>
-```
-
-The attribute is created if it is not already there. Use this for the bar chart, so
-the bar widths come from the same JSON as the labels.
-
-### 3. Region markers — the guard against a figure with no marker
+A region asserts that everything inside it is a measurement, and catches a figure
+typed straight into the prose — which the name check alone cannot see:
 
 ```html
 <!--bench:region-->
-  ... the numbers table, the chart labels, the hero figure ...
+  ... the numbers table, the hero figure, the chart ...
 <!--/bench:region-->
 ```
 
-Inside a region, **every digit a reader can see must come from a marker**. Two checks
-run:
-
-- **Visible text.** Span markers, comments and all tags are stripped; any digit left
-  in the text is an error.
-- **Chart geometry.** A `rect`, `circle`, `line`, `polygon`, `polyline` or `path`
-  inside a region that carries digits must also carry a `data-bench-*` attribute — a
-  hard-coded bar width is a figure like any other.
-
-A shape whose digits really are static — an axis rule, a stroke width — opts out with
-a bare `data-bench-ignore` attribute:
-
-```html
-<line x1="0" y1="9" x2="100" y2="9" data-bench-ignore/>
-```
-
-Put the numbers table, the hero figure and the chart inside a region. Keep CSS, the
-`<svg viewBox>` and prose that legitimately contains digits (a git version, a shell
-snippet) outside one — the region is a claim that everything in it is a measurement.
-
-### Key grammar
-
-```
-meta.<field>
-proof.<scenario>
-<scenario>.<field>
-<scenario>.<side>.<metric>
-<scenario>.ratio.<disk|time>
-```
-
-`<scenario>` is one of `kernel`, `same-commit`, `cross-commit`, `no-match`, `btrfs`,
-`ext4`. `<side>` is `git` or `sprout`.
-
-| key | renders as |
-| --- | --- |
-| `meta.status` | `Provisional, 2026-08-19: baseline-only run — …` |
-| `meta.generated` | `2026-08-19` |
-| `meta.runs` | `3` |
-| `meta.tool_version` | `git-sprout 0.1.0` |
-| `meta.machine` | `Apple M2, 8 cores, macOS 26.6.1, git 2.55.0, APFS` |
-| `<sc>.title` | `Linux kernel shallow clone` |
-| `<sc>.label` | `Linux kernel shallow clone — 95 056 files, 1.4 GB` |
-| `<sc>.files` | `95 056` |
-| `<sc>.size` | `1.4 GB` |
-| `<sc>.machine` | the machine that measured this row |
-| `<sc>.status` / `<sc>.skip_reason` | `skipped` / why |
-| `<sc>.<side>.summary` | `11.58s · 1805 MB` |
-| `<sc>.<side>.time_s` | `11.58s` |
-| `<sc>.<side>.disk_mb` | `1805 MB` |
-| `<sc>.<side>.first_status_s` | `0.35s` |
-| `<sc>.<side>.tree_oid` | `92b9cabb…` |
-| `<sc>.<side>.dirty_paths` | `13` |
-| `<sc>.<side>.disk_pct` | `100.0%` — share of the larger side, for bar widths |
-| `<sc>.<side>.time_pct` | `100.0%` |
-| `<sc>.ratio.disk` | `42x` |
-| `<sc>.ratio.time` | `2.1x` |
-| `<sc>.oid_match` | `identical` |
-| `proof.btrfs` | the verbatim `btrfs filesystem du` block |
-
-A scenario that was skipped renders `not measured`; every `*.sprout.*` key in a
-baseline-only report renders `—`. Run `--print-keys` for the live list.
-
-### Required markers
-
-The script fails if any of these is absent, so a figure cannot quietly stop being
-regenerated:
-
-**`docs/index.html`** — `meta.status`, `meta.generated`, `meta.runs`,
-`kernel.label`, `kernel.files`, `kernel.machine`, `kernel.git.summary`,
-`kernel.sprout.summary`, `kernel.git.disk_mb`, `kernel.sprout.disk_mb`,
-`kernel.ratio.disk`, `same-commit.label`, `same-commit.git.summary`,
-`same-commit.sprout.summary`, `cross-commit.label`, `cross-commit.git.summary`,
-`cross-commit.sprout.summary`, `btrfs.label`, `btrfs.machine`, `btrfs.git.summary`,
-`btrfs.sprout.summary`, `ext4.label`, `ext4.git.summary`, `ext4.sprout.summary`,
-`proof.btrfs`.
-
-**`README.md`** — `meta.status`, `kernel.label`, `kernel.machine`,
-`kernel.git.summary`, `kernel.sprout.summary`, `kernel.ratio.disk`.
-
-Any other key may be used freely; only the list above is mandatory. The lists live at
-the top of `render-site-numbers.py`.
+Inside a region, span markers and comments are stripped and then two checks run: any
+digit left in the visible text is an error, and any `rect`, `circle`, `line`,
+`polygon`, `polyline` or `path` carrying digits outside a marker is an error. A shape
+whose digits really are static opts out with a bare `data-bench-ignore` attribute.
+Keep CSS, `<svg viewBox>` and prose that legitimately contains digits outside a
+region.

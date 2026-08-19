@@ -7,6 +7,7 @@
 # ///
 
 import argparse
+import html
 import json
 import re
 import sys
@@ -15,76 +16,41 @@ from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_REPORT = REPO_ROOT / "bench" / "results.json"
-
-SCENARIOS: list[str] = [
-    "kernel",
-    "same-commit",
-    "cross-commit",
-    "no-match",
-    "btrfs",
-    "ext4",
-]
-SIDES: list[str] = ["git", "sprout"]
+TARGETS: list[str] = ["docs/index.html", "README.md"]
 
 NOT_MEASURED = "not measured"
 NOT_EXERCISED = "—"
 
-# Markers the site and the README must carry. A page that quietly loses one is the
-# failure this script exists to prevent, so a missing key is an error, not a warning.
-REQUIRED: dict[str, list[str]] = {
-    "docs/index.html": [
-        "meta.status",
-        "meta.generated",
-        "meta.runs",
-        "kernel.label",
-        "kernel.files",
-        "kernel.machine",
-        "kernel.git.summary",
-        "kernel.sprout.summary",
-        "kernel.git.disk_mb",
-        "kernel.sprout.disk_mb",
-        "kernel.ratio.disk",
-        "same-commit.label",
-        "same-commit.git.summary",
-        "same-commit.sprout.summary",
-        "cross-commit.label",
-        "cross-commit.git.summary",
-        "cross-commit.sprout.summary",
-        "btrfs.label",
-        "btrfs.machine",
-        "btrfs.git.summary",
-        "btrfs.sprout.summary",
-        "ext4.label",
-        "ext4.git.summary",
-        "ext4.sprout.summary",
-        "proof.btrfs",
-    ],
-    "README.md": [
-        "meta.status",
-        "kernel.label",
-        "kernel.machine",
-        "kernel.git.summary",
-        "kernel.sprout.summary",
-        "kernel.ratio.disk",
-    ],
+# The page names a workload; the harness names a scenario. `no-match` is measured for
+# the worst-case budget in spec §9 and is deliberately not a figure on the page.
+WORKLOADS: dict[str, str] = {
+    "kernel": "kernel",
+    "medium": "same-commit",
+    "cross": "cross-commit",
+    "btrfs": "btrfs",
+    "ext4": "ext4",
 }
+# The ext4 row states that the tool falls back, so it has no tool column.
+SIDES_ON_PAGE: dict[str, list[str]] = {"ext4": ["git"]}
+DEFAULT_SIDES: list[str] = ["git", "sprout"]
+
+# The sentence about ten engineers with five worktrees each.
+FLEET_WORKTREES = 50
+
+# The bar chart's viewBox is 1000 units wide.
+CHART_WIDTH = 1000.0
 
 SPAN_RE = re.compile(
     r"<!--bench:(?!region\b)([A-Za-z0-9_.\-]+)-->(.*?)<!--/bench-->", re.DOTALL
 )
 REGION_RE = re.compile(r"<!--bench:region-->(.*?)<!--/bench:region-->", re.DOTALL)
-TAG_WITH_ATTR_RE = re.compile(r"<[^<>]*\bdata-bench-[^<>]*>", re.DOTALL)
-ATTR_RE = re.compile(r'data-bench-([A-Za-z][A-Za-z0-9\-]*)="([A-Za-z0-9_.\-]+)"')
 COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
 TAG_RE = re.compile(r"<[^<>]*>", re.DOTALL)
 SHAPE_RE = re.compile(
     r"<(?:rect|circle|line|polygon|polyline|path)\b[^<>]*>", re.IGNORECASE
 )
+WIDTH_RE = re.compile(r'width="[^"]*"')
 DIGITS_RE = re.compile(r"\d")
-
-
-class MarkerError(Exception):
-    pass
 
 
 # --- formatting ----------------------------------------------------------------
@@ -104,6 +70,13 @@ def fmt_disk(mebibytes: float | None) -> str:
     return f"{mebibytes:.0f} MB"
 
 
+def fmt_disk_large(mebibytes: float | None) -> str:
+    """Bigger figures read better in GB, and the prose around them is written that way."""
+    if mebibytes is None:
+        return NOT_MEASURED
+    return f"{mebibytes / 1024:.1f} GB" if mebibytes >= 1024 else fmt_disk(mebibytes)
+
+
 def fmt_ratio(value: float | None) -> str:
     if value is None:
         return NOT_MEASURED
@@ -111,202 +84,155 @@ def fmt_ratio(value: float | None) -> str:
 
 
 def fmt_count(value: int | None) -> str:
-    return NOT_MEASURED if value is None else f"{value:,}".replace(",", " ")
+    return NOT_MEASURED if value is None else f"{value:,}".replace(",", " ")
 
 
-def fmt_size(size_bytes: int | None) -> str:
+def fmt_bytes(size_bytes: int | None) -> str:
     if size_bytes is None:
         return NOT_MEASURED
     gib = size_bytes / 1024**3
     return f"{gib:.1f} GB" if gib >= 1 else f"{size_bytes / 1024**2:.0f} MB"
 
 
-def fmt_oid(oid: str | None) -> str:
-    if not oid:
-        return NOT_MEASURED
-    return f"{oid[:8]}…" if isinstance(oid, str) else NOT_MEASURED
+# --- the key catalogue ---------------------------------------------------------
 
 
-def fmt_pct(value: float | None, largest: float | None) -> str:
-    if value is None or not largest or largest <= 0:
-        return "0%"
-    return f"{max(value, 0) / largest * 100:.1f}%"
+def median(scenario: dict[str, Any] | None, side: str, metric: str) -> float | None:
+    if scenario is None or scenario["status"] != "ok":
+        return None
+    data = scenario.get("sides", {}).get(side)
+    return None if data is None else data[metric]["median"]
 
 
-# --- key catalogue -------------------------------------------------------------
-
-
-def machine_line(machine: dict[str, Any]) -> str:
+def macos_line(machine: dict[str, Any]) -> str:
     return (
         f"{machine['cpu']}, {machine['cores']} cores, {machine['os']}, "
-        f"git {machine['git_version'].removeprefix('git version ')}, "
-        f"{machine['filesystem'].upper()}"
+        f"git {machine['git_version'].removeprefix('git version ')}"
     )
 
 
-def status_line(report: dict[str, Any]) -> str:
-    generated = report["generated_at"][:10]
-    if report["baseline_only"]:
-        return (
-            f"Provisional, {generated}: baseline-only run — both columns measured "
-            "`git worktree add`, the tool itself was not exercised."
-        )
-    version = report["tool"]["version"] or "an unreleased build"
-    if report["provisional"]:
-        return (
-            f"Provisional, {generated}: measured with {version}, "
-            "not yet confirmed by the differential suite."
-        )
-    return f"Measured {generated} with {version}, differential suite green."
+def linux_line(machine: dict[str, Any]) -> str:
+    return (
+        f"kernel {machine['kernel'].removeprefix('Linux ')}, "
+        f"git {machine['git_version'].removeprefix('git version ')}, loopback btrfs and ext4"
+    )
 
 
-def build_keys(report: dict[str, Any]) -> dict[str, str]:
+def build_keys(report: dict[str, Any]) -> tuple[dict[str, str], dict[str, float]]:
+    """Every name the pages may carry, and the bar widths that are markup, not text."""
     baseline_only: bool = report["baseline_only"]
     by_id = {s["id"]: s for s in report["scenarios"]}
 
-    keys: dict[str, str] = {
-        "meta.status": status_line(report),
-        "meta.generated": report["generated_at"][:10],
-        "meta.runs": str(report["runs_per_side"]),
-        "meta.tool_version": report["tool"]["version"] or NOT_MEASURED,
-        "meta.machine": machine_line(report["machine"]),
-        "proof.btrfs": NOT_MEASURED,
-    }
-
-    for name in SCENARIOS:
-        scenario = by_id.get(name)
+    def blanked(workload: str, side: str, rendered: str) -> str:
+        scenario = by_id.get(WORKLOADS[workload])
         ok = scenario is not None and scenario["status"] == "ok"
-        sides = scenario.get("sides", {}) if scenario else {}
-        fixture = scenario.get("fixture", {}) if scenario else {}
-        machine = (scenario or {}).get("machine") or report["machine"]
+        return NOT_EXERCISED if baseline_only and side == "sprout" and ok else rendered
 
-        title = (scenario or {}).get("title", NOT_MEASURED)
-        keys[f"{name}.title"] = title
-        keys[f"{name}.label"] = (
-            f"{title} — {fmt_count(fixture['tracked_files'])} files, "
-            f"{fmt_size(fixture['logical_bytes'])}"
-            if fixture
-            else title
-        )
-        keys[f"{name}.machine"] = machine_line(machine) if ok else NOT_MEASURED
-        keys[f"{name}.files"] = fmt_count(fixture.get("tracked_files"))
-        keys[f"{name}.size"] = fmt_size(fixture.get("logical_bytes"))
-        keys[f"{name}.status"] = (scenario or {}).get("status", "missing")
-        keys[f"{name}.skip_reason"] = (scenario or {}).get("skip_reason") or ""
-
-        largest_disk = (
-            max(
-                (sides.get(s, {}).get("disk_mb", {}).get("median", 0) or 0)
-                for s in SIDES
+    keys: dict[str, str] = {}
+    for workload, scenario_id in WORKLOADS.items():
+        scenario = by_id.get(scenario_id)
+        for side in SIDES_ON_PAGE.get(workload, DEFAULT_SIDES):
+            keys[f"{workload}.disk.{side}"] = blanked(
+                workload, side, fmt_disk(median(scenario, side, "disk_mb"))
             )
-            if sides
-            else 0
-        )
-        largest_time = (
-            max(
-                (sides.get(s, {}).get("time_s", {}).get("median", 0) or 0)
-                for s in SIDES
-            )
-            if sides
-            else 0
-        )
-
-        for side in SIDES:
-            data = sides.get(side, {})
-            blank = baseline_only and side == "sprout" and ok
-            time_s = data.get("time_s", {}).get("median") if ok else None
-            disk_mb = data.get("disk_mb", {}).get("median") if ok else None
-            status_s = data.get("first_status_s", {}).get("median") if ok else None
-
-            keys[f"{name}.{side}.time_s"] = NOT_EXERCISED if blank else fmt_time(time_s)
-            keys[f"{name}.{side}.disk_mb"] = (
-                NOT_EXERCISED if blank else fmt_disk(disk_mb)
-            )
-            keys[f"{name}.{side}.first_status_s"] = (
-                NOT_EXERCISED if blank else fmt_time(status_s)
-            )
-            keys[f"{name}.{side}.summary"] = (
-                NOT_EXERCISED
-                if blank
-                else (
-                    f"{fmt_time(time_s)} · {fmt_disk(disk_mb)}"
-                    if ok
-                    else (scenario or {}).get("skip_reason") or NOT_MEASURED
-                )
-            )
-            keys[f"{name}.{side}.tree_oid"] = (
-                NOT_EXERCISED
-                if blank
-                else fmt_oid(data.get("tree_oid") if ok else None)
-            )
-            keys[f"{name}.{side}.dirty_paths"] = (
-                NOT_EXERCISED
-                if blank
-                else fmt_count(data.get("dirty_paths") if ok else None)
-            )
-            keys[f"{name}.{side}.disk_pct"] = (
-                "0%" if blank else fmt_pct(disk_mb, largest_disk)
-            )
-            keys[f"{name}.{side}.time_pct"] = (
-                "0%" if blank else fmt_pct(time_s, largest_time)
+            keys[f"{workload}.time.{side}"] = blanked(
+                workload, side, fmt_time(median(scenario, side, "time_s"))
             )
 
-        comparison = (scenario or {}).get("comparison", {})
-        keys[f"{name}.ratio.disk"] = (
-            NOT_EXERCISED if baseline_only else fmt_ratio(comparison.get("disk_ratio"))
-        )
-        keys[f"{name}.ratio.time"] = (
-            NOT_EXERCISED if baseline_only else fmt_ratio(comparison.get("time_ratio"))
-        )
-        keys[f"{name}.oid_match"] = (
-            NOT_EXERCISED
-            if baseline_only
-            else ("identical" if comparison.get("tree_oid_match") else "DIFFERENT")
-        )
+    kernel = by_id.get("kernel")
+    fixture = (kernel or {}).get("fixture", {})
+    keys["kernel.files"] = fmt_count(fixture.get("tracked_files"))
+    keys["kernel.bytes"] = fmt_bytes(fixture.get("logical_bytes"))
 
-        proof = (scenario or {}).get("proof")
-        if proof:
-            keys[f"proof.{name}"] = proof["text"]
+    git_disk = median(kernel, "git", "disk_mb")
+    sprout_disk = median(kernel, "sprout", "disk_mb")
+    keys["kernel.disk.git.round"] = fmt_disk_large(git_disk)
 
-    return keys
+    derived_unavailable = baseline_only or git_disk is None or sprout_disk is None
+    keys["kernel.disk.ratio"] = (
+        NOT_EXERCISED
+        if baseline_only
+        else fmt_ratio((kernel or {}).get("comparison", {}).get("disk_ratio"))
+    )
+    keys["kernel.disk.saved"] = (
+        NOT_EXERCISED if derived_unavailable else fmt_disk_large(git_disk - sprout_disk)
+    )
+    keys["fleet.disk.git"] = (
+        NOT_MEASURED if git_disk is None else fmt_disk_large(git_disk * FLEET_WORKTREES)
+    )
+    keys["fleet.disk.sprout"] = (
+        NOT_EXERCISED
+        if derived_unavailable
+        else fmt_disk_large(sprout_disk * FLEET_WORKTREES)
+    )
+
+    proof = (by_id.get("btrfs") or {}).get("proof")
+    keys["btrfs.du"] = proof["text"] if proof else NOT_MEASURED
+
+    macos = next(
+        (
+            s["machine"]
+            for s in report["scenarios"]
+            if s["machine"]["os"].startswith("macOS")
+        ),
+        report["machine"],
+    )
+    keys["env.macos"] = macos_line(macos)
+    linux = next(
+        (
+            s["machine"]
+            for s in report["scenarios"]
+            if s["status"] == "ok" and s["id"] in ("btrfs", "ext4")
+        ),
+        None,
+    )
+    keys["env.linux"] = linux_line(linux) if linux else NOT_MEASURED
+
+    # The bars are derived from the disk figures so the chart can never disagree with
+    # the table it sits above.
+    largest = max(git_disk or 0.0, sprout_disk or 0.0)
+    bars: dict[str, float] = {
+        "chart.bar.git": 0.0
+        if not largest
+        else (git_disk or 0.0) / largest * CHART_WIDTH,
+        "chart.bar.sprout": 0.0
+        if baseline_only or not largest
+        else max(sprout_disk or 0.0, 0.0) / largest * CHART_WIDTH,
+    }
+    return keys, bars
 
 
 # --- rewriting -----------------------------------------------------------------
 
 
-def set_attribute(tag: str, name: str, value: str) -> str:
-    pattern = re.compile(rf'(\s{re.escape(name)}=")[^"]*(")')
-    if pattern.search(tag):
-        return pattern.sub(lambda m: m.group(1) + value + m.group(2), tag, count=1)
-    close = "/>" if tag.rstrip().endswith("/>") else ">"
-    return tag.rstrip()[: -len(close)].rstrip() + f' {name}="{value}"' + close
+def render(
+    key: str, previous: str, keys: dict[str, str], bars: dict[str, float], as_html: bool
+) -> str:
+    """A bar keeps the site's own markup and only has its width rewritten."""
+    if key in bars:
+        width = f"{bars[key]:.1f}"
+        if WIDTH_RE.search(previous):
+            return WIDTH_RE.sub(f'width="{width}"', previous, count=1)
+        return f'<rect class="bar" x="0" y="0" width="{width}" height="24"/>'
+    value = keys[key]
+    return html.escape(value, quote=False) if as_html else value
 
 
-def rewrite(text: str, keys: dict[str, str]) -> tuple[str, set[str], list[str]]:
+def rewrite(
+    text: str, keys: dict[str, str], bars: dict[str, float], as_html: bool
+) -> tuple[str, set[str], list[str]]:
     seen: set[str] = set()
     unknown: list[str] = []
 
     def span(match: re.Match[str]) -> str:
-        key = match.group(1)
+        key, previous = match.group(1), match.group(2)
         seen.add(key)
-        if key not in keys:
+        if key not in keys and key not in bars:
             unknown.append(key)
             return match.group(0)
-        return f"<!--bench:{key}-->{keys[key]}<!--/bench-->"
+        return f"<!--bench:{key}-->{render(key, previous, keys, bars, as_html)}<!--/bench-->"
 
-    text = SPAN_RE.sub(span, text)
-
-    def tag(match: re.Match[str]) -> str:
-        rewritten = match.group(0)
-        for attribute, key in ATTR_RE.findall(rewritten):
-            seen.add(key)
-            if key not in keys:
-                unknown.append(key)
-                continue
-            rewritten = set_attribute(rewritten, attribute, keys[key])
-        return rewritten
-
-    return TAG_WITH_ATTR_RE.sub(tag, text), seen, unknown
+    return SPAN_RE.sub(span, text), seen, unknown
 
 
 def unmarked_numbers(text: str) -> list[str]:
@@ -317,37 +243,42 @@ def unmarked_numbers(text: str) -> list[str]:
     """
     offenders: list[str] = []
     for region in REGION_RE.findall(text):
-        for shape in SHAPE_RE.findall(region):
-            if "data-bench-" not in shape and DIGITS_RE.search(shape):
-                offenders.append(shape.strip())
-        stripped = COMMENT_RE.sub(" ", SPAN_RE.sub(" ", region))
-        for line in TAG_RE.sub(" ", stripped).splitlines():
-            if DIGITS_RE.search(line):
-                offenders.append(line.strip())
+        outside = COMMENT_RE.sub(" ", SPAN_RE.sub(" ", region))
+        offenders += [
+            shape.strip()
+            for shape in SHAPE_RE.findall(outside)
+            if "data-bench-ignore" not in shape and DIGITS_RE.search(shape)
+        ]
+        offenders += [
+            line.strip()
+            for line in TAG_RE.sub(" ", outside).splitlines()
+            if DIGITS_RE.search(line)
+        ]
     return offenders
 
 
-def process(path: Path, relative: str, keys: dict[str, str], write: bool) -> list[str]:
-    problems: list[str] = []
+def process(
+    path: Path,
+    relative: str,
+    keys: dict[str, str],
+    bars: dict[str, float],
+    write: bool,
+) -> tuple[list[str], set[str]]:
     if not path.exists():
-        return [
-            f"{relative}: missing; it must carry these markers: {', '.join(REQUIRED[relative])}"
-        ]
+        return [f"{relative}: missing"], set()
 
     original = path.read_text()
-    if original.count("<!--bench:") - original.count(
-        "<!--bench:region-->"
-    ) != original.count("<!--/bench-->"):
+    problems: list[str] = []
+    openers = original.count("<!--bench:") - original.count("<!--bench:region-->")
+    if openers != original.count("<!--/bench-->"):
         problems.append(f"{relative}: unbalanced bench markers")
 
-    updated, seen, unknown = rewrite(original, keys)
+    updated, seen, unknown = rewrite(
+        original, keys, bars, as_html=relative.endswith(".html")
+    )
     problems += [
-        f"{relative}: unknown marker key '{key}'" for key in sorted(set(unknown))
-    ]
-    problems += [
-        f"{relative}: required marker '{key}' is missing"
-        for key in REQUIRED[relative]
-        if key not in seen
+        f"{relative}: marker '{key}' has no value in the report"
+        for key in sorted(set(unknown))
     ]
     problems += [
         f"{relative}: unmarked number inside a bench region: {line}"
@@ -357,7 +288,7 @@ def process(path: Path, relative: str, keys: dict[str, str], write: bool) -> lis
     if write and not problems and updated != original:
         path.write_text(updated)
         print(f"bench: rewrote {relative}")
-    return problems
+    return problems, seen
 
 
 def main() -> int:
@@ -369,7 +300,6 @@ def main() -> int:
     parser.add_argument(
         "--print-keys", action="store_true", help="dump every key and its value"
     )
-    parser.add_argument("--target", action="append", help="check only these targets")
     args = parser.parse_args()
 
     if not args.source.exists():
@@ -380,20 +310,32 @@ def main() -> int:
         return 1
 
     report = json.loads(args.source.read_text())
-    keys = build_keys(report)
+    keys, bars = build_keys(report)
 
     if args.print_keys:
         for key in sorted(keys):
             print(f"{key}\t{keys[key]}")
+        for key in sorted(bars):
+            print(f"{key}\twidth={bars[key]:.1f} of {CHART_WIDTH:.0f}")
         return 0
 
-    targets = args.target or list(REQUIRED)
     problems: list[str] = []
-    for relative in targets:
-        if relative not in REQUIRED:
-            print(f"bench: {relative} is not a known target", file=sys.stderr)
-            return 1
-        problems += process(REPO_ROOT / relative, relative, keys, write=not args.check)
+    placed: set[str] = set()
+    for relative in TARGETS:
+        found, seen = process(
+            REPO_ROOT / relative, relative, keys, bars, write=not args.check
+        )
+        problems += found
+        placed |= seen
+
+    # The check that makes this stream worth having, in both directions: a marker the
+    # report cannot fill is caught above; a figure the report has and no page carries
+    # is a number that quietly stopped being regenerated.
+    orphaned = (set(keys) | set(bars)) - placed
+    problems += [
+        f"no page carries marker '{key}', so its value is not being regenerated"
+        for key in sorted(orphaned)
+    ]
 
     for problem in problems:
         print(f"bench: {problem}", file=sys.stderr)
@@ -401,7 +343,13 @@ def main() -> int:
         return 1
 
     if report["provisional"]:
-        print(f"bench: {status_line(report)}", file=sys.stderr)
+        generated = report["generated_at"][:10]
+        reason = (
+            "both columns measured `git worktree add`"
+            if report["baseline_only"]
+            else "the differential suite has not confirmed this build"
+        )
+        print(f"bench: provisional figures ({generated}): {reason}", file=sys.stderr)
     return 0
 
 
