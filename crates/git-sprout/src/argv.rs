@@ -78,11 +78,10 @@ impl AddCommand {
         args
     }
 
-    /// The same list with `--no-checkout` added, for step 2 of the algorithm.
-    pub fn git_args_no_checkout(&self) -> Vec<OsString> {
-        let mut args = self.globals.clone();
-        args.push(OsString::from("worktree"));
-        args.push(OsString::from("add"));
+    /// The subcommand arguments for step 2, which creates the worktree without files.
+    /// The globals are left out; whoever runs git puts them in front.
+    pub fn worktree_add_args_no_checkout(&self) -> Vec<OsString> {
+        let mut args = vec![OsString::from("worktree"), OsString::from("add")];
         let insert_at = self.double_dash.unwrap_or(self.passthrough.len());
         args.extend(self.passthrough[..insert_at].iter().cloned());
         args.push(OsString::from("--no-checkout"));
@@ -419,7 +418,7 @@ mod tests {
     fn inserts_no_checkout_before_a_double_dash() {
         let add = add_of(&["add", "--", "../wt"]);
         assert_eq!(
-            strings(&add.git_args_no_checkout()),
+            strings(&add.worktree_add_args_no_checkout()),
             ["worktree", "add", "--no-checkout", "--", "../wt"]
         );
     }
@@ -428,7 +427,7 @@ mod tests {
     fn appends_no_checkout_when_there_is_no_double_dash() {
         let add = add_of(&["add", "-b", "feature", "../wt"]);
         assert_eq!(
-            strings(&add.git_args_no_checkout()),
+            strings(&add.worktree_add_args_no_checkout()),
             ["worktree", "add", "-b", "feature", "../wt", "--no-checkout"]
         );
     }

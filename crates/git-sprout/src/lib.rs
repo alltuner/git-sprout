@@ -5,8 +5,17 @@ use std::ffi::OsString;
 use std::process::ExitCode;
 
 pub mod argv;
+pub mod attributes;
+pub mod clone;
 pub mod delegate;
+pub mod git;
+pub mod plan;
+pub mod scratch_index;
+pub mod source;
+pub mod sprout;
 pub mod stats;
+pub mod tree;
+pub mod verify;
 
 use argv::{AddCommand, Invocation};
 use stats::Stats;
@@ -15,8 +24,7 @@ use stats::Stats;
 pub fn run(args: Vec<OsString>) -> ExitCode {
     let mut stats = Stats::default();
 
-    let invocation = argv::parse(&args);
-    let (git_args, reason) = match invocation {
+    let (git_args, reason) = match argv::parse(&args) {
         Invocation::Version => {
             println!("git-sprout {}", env!("CARGO_PKG_VERSION"));
             return ExitCode::SUCCESS;
@@ -24,7 +32,7 @@ pub fn run(args: Vec<OsString>) -> ExitCode {
         Invocation::Delegate { git_args, reason } => (git_args, reason.to_string()),
         Invocation::Add(add) => match decline(&add) {
             Some(reason) => (add.git_args(), reason),
-            None => (add.git_args(), "acceleration is not built yet".to_string()),
+            None => return sprout::add(&add, &mut stats),
         },
     };
 
