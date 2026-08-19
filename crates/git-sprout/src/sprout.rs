@@ -22,7 +22,7 @@ use crate::stats::Stats;
 use crate::tree;
 use crate::verify;
 
-/// The most racily-clean paths worth asking git about in one command line.
+/// The most paths worth naming on one `git diff-files` command line.
 const RACY_PATH_LIMIT: usize = 1000;
 
 /// The configuration that decides how blob bytes become working-tree bytes. Cloning is
@@ -396,14 +396,16 @@ fn changed_paths(git: &Git, source: &Path, paths: &[Vec<u8>]) -> HashSet<Vec<u8>
     if paths.is_empty() {
         return HashSet::new();
     }
-    if paths.len() > RACY_PATH_LIMIT {
-        return paths.iter().cloned().collect();
-    }
     let mut arguments: Vec<OsString> = ["diff-files", "-z", "--name-only", "--"]
         .iter()
         .map(OsString::from)
         .collect();
-    arguments.extend(paths.iter().map(|path| as_path(path).into_os_string()));
+    // Past a certain number of paths the command line stops being a way to ask the
+    // question, so ask about the whole worktree instead and let the caller pick out the
+    // paths it cares about.
+    if paths.len() <= RACY_PATH_LIMIT {
+        arguments.extend(paths.iter().map(|path| as_path(path).into_os_string()));
+    }
     let Ok(output) = git.capture(Some(source), arguments) else {
         return paths.iter().cloned().collect();
     };

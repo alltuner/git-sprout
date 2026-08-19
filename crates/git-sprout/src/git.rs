@@ -74,10 +74,18 @@ impl Git {
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .spawn()?;
-        if let Some(mut stdin) = child.stdin.take() {
-            stdin.write_all(input)?;
-        }
+        // The input has to be written while the output is being read: git streams its
+        // answers as it consumes paths, so writing everything first deadlocks as soon as
+        // either pipe fills.
+        let stdin = child.stdin.take();
+        let input = input.to_vec();
+        let writer = std::thread::spawn(move || {
+            if let Some(mut stdin) = stdin {
+                let _ = stdin.write_all(&input);
+            }
+        });
         let output = child.wait_with_output()?;
+        let _ = writer.join();
         if !output.status.success() {
             return Err(io::Error::other("git exited with a failure status"));
         }
