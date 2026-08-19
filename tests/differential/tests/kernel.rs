@@ -71,6 +71,10 @@ fn kernel_worktree_matches_git() {
         }
     );
 
+    // The fixture repository is a cache, not a scratch directory: an interrupted run
+    // leaves a branch and a worktree behind, so start from a known state.
+    cleanup(&workspace, &repo, &cache);
+
     let control = run_side(&workspace, &cache, &repo, "control", &Tool::Git);
     check_kernel_facts(&workspace, &control, case_insensitive);
     cleanup(&workspace, &repo, &cache);

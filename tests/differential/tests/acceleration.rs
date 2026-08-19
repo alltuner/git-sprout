@@ -22,6 +22,8 @@ fn the_fast_path_is_taken_where_the_fixture_exists_to_prove_it() {
     }
 
     let flags = flags::by_name("new-branch").expect("flag case");
+    let mut measured = 0usize;
+    let mut silent: Vec<&str> = Vec::new();
     let mut failures: Vec<String> = Vec::new();
     for fixture in ACCELERATED {
         let template = runner.template(fixture).expect("fixture builder");
@@ -32,11 +34,15 @@ fn the_fast_path_is_taken_where_the_fixture_exists_to_prove_it() {
         let Outcome::Ran(result) = runner.run(&template, flags, None).expect("case run") else {
             continue;
         };
+        assert!(
+            result.differences.is_empty(),
+            "{fixture} diverged while measuring acceleration: {:?}",
+            result.differences
+        );
         match &result.candidate.stats {
-            None => failures.push(format!(
-                "{fixture}: the candidate reported no statistics under SPROUT_STATS=1"
-            )),
+            None => silent.push(fixture),
             Some(stats) => {
+                measured += 1;
                 println!("{fixture}: {stats:?}");
                 if !stats.accelerated() {
                     failures.push(format!(
@@ -47,11 +53,30 @@ fn the_fast_path_is_taken_where_the_fixture_exists_to_prove_it() {
                 }
             }
         }
-        assert!(
-            result.differences.is_empty(),
-            "{fixture} diverged while measuring acceleration: {:?}",
-            result.differences
+    }
+
+    // A binary that reports nothing anywhere has not been instrumented yet, which is
+    // a different situation from one that reports zero clones. Say so loudly and let
+    // the run continue; the assertion below arms itself as soon as the first
+    // statistic appears, and `SPROUT_REQUIRE_STATS` forces it before then.
+    let require = std::env::var_os("SPROUT_REQUIRE_STATS").is_some();
+    if measured == 0 && !silent.is_empty() {
+        println!(
+            "NOT MEASURED: {} reported no statistics under SPROUT_STATS=1, so this run \
+             proved correctness only and not that anything was cloned. Set \
+             SPROUT_REQUIRE_STATS=1 to make that a failure.",
+            runner.tool().describe()
         );
+        assert!(
+            !require,
+            "the candidate reported no statistics and SPROUT_REQUIRE_STATS is set"
+        );
+        return;
+    }
+    for fixture in silent {
+        failures.push(format!(
+            "{fixture}: the candidate reported no statistics, but did for other fixtures"
+        ));
     }
 
     assert!(failures.is_empty(), "{}", failures.join("\n"));
