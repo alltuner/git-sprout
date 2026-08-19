@@ -393,14 +393,14 @@ tr.is-headline th,tr.is-headline td{font-weight:700;color:var(--fg)}
   <div class="container">
     <div class="reveal">
       <p class="eyebrow">Compatibility</p>
-      <h2 class="section-title">Indistinguishable from git, except in time, disk and one timestamp.</h2>
+      <h2 class="section-title">Indistinguishable from git, and specific about where it is not.</h2>
       <!-- TODO(M4): when the differential suite is green, this paragraph becomes the
            verified claim ("verified byte for byte on every release"). Not before. -->
       <p class="lead">This is the contract git-sprout is built to, and the differential test suite is being written to prove it. Until that suite is green, treat the list below as a design promise rather than a result.</p>
     </div>
 
     <ul class="checks reveal">
-      <li>Same flags, same output on stdout and stderr, same exit codes.</li>
+      <li>Same flags, same stdout, same exit codes. Same stderr too, apart from the progress meter noted below.</li>
       <li>Same hooks, in the same order, with the same arguments.</li>
       <li>Same files, same modes, same index, compared byte for byte against real <code>git worktree add</code> across a matrix that includes <code>eol</code> conversion, <code>ident</code>, custom filters, LFS, submodules, sparse checkout, split index, SHA-256 repositories and case-insensitive filesystems, where the correct answer is the same set of already-modified paths git itself leaves behind rather than a clean worktree.</li>
       <li>Untracked and ignored files are not copied, exactly as git does not copy them.</li>
@@ -409,9 +409,11 @@ tr.is-headline th,tr.is-headline td{font-weight:700;color:var(--fg)}
       <li>Any flag or combination it does not fully understand is not an error. It hands the whole command to git and exits with git's status.</li>
     </ul>
 
-    <p class="note reveal">One difference you can observe: files that were cloned keep the timestamp they had in the checkout they came from, rather than the moment the worktree was created. Nothing git does depends on it, but <code>make</code> and anything else that reads modification times can see it.</p>
+    <p class="note reveal">Two differences you can observe, both deliberate. Files that were cloned keep the timestamp they had in the checkout they came from, rather than the moment the worktree was created. Nothing git does depends on it, but <code>make</code> and anything else that reads modification times can see it.</p>
 
-    <p class="note reveal">Anything else you can tell apart, beyond time, disk and that timestamp, is a bug, and <a href="https://github.com/alltuner/git-sprout/tree/main/tests/differential">here is the test suite that is supposed to catch it</a>.</p>
+    <p class="note reveal">And on a big repository <code>git worktree add</code> prints a progress meter while it writes the files out. sprout has almost no files left to write, so git never starts one: you see less output because less happened.</p>
+
+    <p class="note reveal">Beyond those two, and beyond time and disk, anything you can tell apart is a bug, and <a href="https://github.com/alltuner/git-sprout/tree/main/tests/differential">here is the test suite that is supposed to catch it</a>.</p>
   </div>
 </section>
 

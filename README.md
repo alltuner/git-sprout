@@ -95,11 +95,12 @@ The harness in [`bench/`](bench/) re-measures them and rewrites this table.
 ## Compatibility
 
 `git sprout add` is meant to be indistinguishable from `git worktree add` in every
-observable way except time, disk and one timestamp. That is the contract, and the
-differential suite in [`tests/differential/`](tests/differential/) is being written to
-prove it.
+observable way except time, disk, and the two differences named below. That is the
+contract, and the differential suite in [`tests/differential/`](tests/differential/) is
+being written to prove it.
 
-- Same flags, same output on stdout and stderr, same exit codes.
+- Same flags, same stdout, same exit codes. Same stderr too, apart from the progress meter
+  noted below.
 - Same hooks, in the same order, with the same arguments.
 - Same files, same modes, same index, compared byte for byte against real
   `git worktree add` across a matrix that includes `eol` conversion, `ident`, custom
@@ -113,11 +114,16 @@ prove it.
 - Any flag or combination it does not fully understand is not an error. It hands the whole
   command to git and exits with git's status.
 
-One difference you can observe: files that were cloned keep the timestamp they had in the
-checkout they came from, rather than the moment the worktree was created. Nothing git does
-depends on it, but `make` and anything else that reads modification times can see it.
+Two differences you can observe, both deliberate. Files that were cloned keep the timestamp
+they had in the checkout they came from, rather than the moment the worktree was created.
+Nothing git does depends on it, but `make` and anything else that reads modification times
+can see it.
 
-Anything else you can tell apart, beyond time, disk and that timestamp, is a bug.
+And on a big repository `git worktree add` prints a progress meter while it writes the files
+out. sprout has almost no files left to write, so git never starts one: you see less output
+because less happened.
+
+Beyond those two, and beyond time and disk, anything you can tell apart is a bug.
 
 ## Make it automatic
 
