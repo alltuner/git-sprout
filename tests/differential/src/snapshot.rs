@@ -153,6 +153,31 @@ pub fn capture(
         return Ok(snapshot);
     }
 
+    // Read what the operation left behind before asking git anything: `git status`
+    // and `git ls-files` refresh the index and write it back, which would make the
+    // harness observe its own side effect instead of the result under test.
+    let name = side
+        .worktree
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let admin_dir = side.repo.join(".git").join("worktrees").join(&name);
+    if admin_dir.is_dir() {
+        snapshot.admin = capture_admin(&admin_dir, &norm)?;
+        snapshot.index = index::read(&admin_dir.join("index"), object_format);
+        let mut shared: Vec<std::path::PathBuf> = std::fs::read_dir(&admin_dir)?
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .filter(|p| {
+                p.file_name()
+                    .is_some_and(|n| n.to_string_lossy().starts_with("sharedindex."))
+            })
+            .collect();
+        shared.sort();
+        snapshot.shared_index_count = shared.len();
+        snapshot.shared_index = shared.first().map(|p| index::read(p, object_format));
+    }
+
     snapshot.tree = capture_tree(&side.worktree, &norm)?;
     snapshot.porcelain = {
         let raw = run::git(
@@ -193,27 +218,6 @@ pub fn capture(
         &["ls-files", "-v", "-z"],
     )?);
 
-    let name = side
-        .worktree
-        .file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_default();
-    let admin_dir = side.repo.join(".git").join("worktrees").join(&name);
-    if admin_dir.is_dir() {
-        snapshot.admin = capture_admin(&admin_dir, &norm)?;
-        snapshot.index = index::read(&admin_dir.join("index"), object_format);
-        let mut shared: Vec<std::path::PathBuf> = std::fs::read_dir(&admin_dir)?
-            .filter_map(|e| e.ok())
-            .map(|e| e.path())
-            .filter(|p| {
-                p.file_name()
-                    .is_some_and(|n| n.to_string_lossy().starts_with("sharedindex."))
-            })
-            .collect();
-        shared.sort();
-        snapshot.shared_index_count = shared.len();
-        snapshot.shared_index = shared.first().map(|p| index::read(p, object_format));
-    }
     // A parse failure names the file it failed on, which is a per-side path.
     snapshot.index.parse_error = snapshot
         .index
