@@ -272,12 +272,12 @@ tr.is-headline th,tr.is-headline td{font-weight:700;color:var(--fg)}
 
     <div class="stat">
       <span class="stat__pair">
-        <span class="stat__value" id="stat-git"><!--bench:kernel.disk.git-->1805 MB<!--/bench--></span>
+        <span class="stat__value" id="stat-git"><!--bench:kernel.disk.git-->1814 MB<!--/bench--></span>
         <span class="stat__label">git worktree add</span>
       </span>
       <span class="stat__arrow" aria-hidden="true">→</span>
       <span class="stat__pair">
-        <span class="stat__value stat__value--sprout" id="stat-sprout"><!--bench:kernel.disk.sprout-->43 MB<!--/bench--></span>
+        <span class="stat__value stat__value--sprout" id="stat-sprout"><!--bench:kernel.disk.sprout-->44 MB<!--/bench--></span>
         <span class="stat__label">git sprout add</span>
       </span>
     </div>
@@ -300,18 +300,18 @@ tr.is-headline th,tr.is-headline td{font-weight:700;color:var(--fg)}
          width is its metric scaled against the larger of the two: the bigger bar is
          always 1000, the smaller is round(metric / larger * 1000, 2). Emit exactly:
            chart.bar.git     <rect class="bar" x="0" y="0" width="1000" height="24"/>
-           chart.bar.sprout  <rect class="bar bar--sprout" x="0" y="0" width="23.8" height="24"/>
+           chart.bar.sprout  <rect class="bar bar--sprout" x="0" y="0" width="24.26" height="24"/>
          The classes carry the colour and the reveal transform. Keep them. -->
     <figure class="bars reveal">
       <div class="bars__row">
-        <div class="bars__head"><span class="bars__name">git worktree add</span><span class="bars__figure"><!--bench:kernel.disk.git-->1805 MB<!--/bench--></span></div>
+        <div class="bars__head"><span class="bars__name">git worktree add</span><span class="bars__figure"><!--bench:kernel.disk.git-->1814 MB<!--/bench--></span></div>
         <svg class="bars__track" viewBox="0 0 1000 24" preserveAspectRatio="none" aria-hidden="true"><!--bench:chart.bar.git--><rect class="bar" x="0" y="0" width="1000" height="24"/><!--/bench--></svg>
       </div>
       <div class="bars__row">
-        <div class="bars__head"><span class="bars__name">git sprout add</span><span class="bars__figure bars__figure--sprout"><!--bench:kernel.disk.sprout-->43 MB<!--/bench--></span></div>
-        <svg class="bars__track" viewBox="0 0 1000 24" preserveAspectRatio="none" aria-hidden="true"><!--bench:chart.bar.sprout--><rect class="bar bar--sprout" x="0" y="0" width="23.8" height="24"/><!--/bench--></svg>
+        <div class="bars__head"><span class="bars__name">git sprout add</span><span class="bars__figure bars__figure--sprout"><!--bench:kernel.disk.sprout-->44 MB<!--/bench--></span></div>
+        <svg class="bars__track" viewBox="0 0 1000 24" preserveAspectRatio="none" aria-hidden="true"><!--bench:chart.bar.sprout--><rect class="bar bar--sprout" x="0" y="0" width="24.26" height="24"/><!--/bench--></svg>
       </div>
-      <figcaption class="bars__scale">Same scale, same axis. <!--bench:kernel.disk.ratio-->42x<!--/bench--> less disk. That is <!--bench:kernel.disk.saved-->1.76 GB<!--/bench--> that never gets allocated, every time anyone creates a worktree.</figcaption>
+      <figcaption class="bars__scale">Same scale, same axis. <!--bench:kernel.disk.ratio-->41x<!--/bench--> less disk. That is <!--bench:kernel.disk.saved-->1.73 GB<!--/bench--> that never gets allocated, every time anyone creates a worktree.</figcaption>
     </figure>
 
     <div class="table-wrap reveal">
@@ -323,8 +323,8 @@ tr.is-headline th,tr.is-headline td{font-weight:700;color:var(--fg)}
         <tbody>
           <tr class="is-headline">
             <th scope="row">Linux kernel, <!--bench:kernel.files-->95 056<!--/bench--> files, <!--bench:kernel.bytes-->2.0 GB<!--/bench--></th>
-            <td data-label="git worktree add"><span><!--bench:kernel.time.git-->11.58s<!--/bench--> · <!--bench:kernel.disk.git-->1805 MB<!--/bench--></span></td>
-            <td data-label="git sprout add" class="col-sprout"><span><!--bench:kernel.time.sprout-->5.46s<!--/bench--> · <!--bench:kernel.disk.sprout-->43 MB<!--/bench--></span></td>
+            <td data-label="git worktree add"><span><!--bench:kernel.time.git-->11.06s<!--/bench--> · <!--bench:kernel.disk.git-->1814 MB<!--/bench--></span></td>
+            <td data-label="git sprout add" class="col-sprout"><span><!--bench:kernel.time.sprout-->11.51s<!--/bench--> · <!--bench:kernel.disk.sprout-->44 MB<!--/bench--></span></td>
           </tr>
           <tr>
             <th scope="row">250 MB, 2000 files</th>
@@ -352,7 +352,7 @@ tr.is-headline th,tr.is-headline td{font-weight:700;color:var(--fg)}
 
     <p class="note reveal" style="margin-top:1.75rem">Ten engineers with five worktrees each is <!--bench:fleet.disk.git-->90 GB<!--/bench--> of kernel checkouts on git, and about <!--bench:fleet.disk.sprout-->2 GB<!--/bench--> on sprout.</p>
 
-    <p class="note reveal">About that time column, straight: on a small repo this saves under a second, and the reason to install it there is the disk column. On a monorepo it saves about half the wall clock as well. Cost scales with file count, not with bytes. A huge repo with few tracked files has no time to save at all, and still saves all of the disk.</p>
+    <p class="note reveal">About that time column, straight: this is not a speed-up. On a small repo it saves under a second, and on the kernel the two commands finish within half a second of each other. Cloning in parallel is future work. The disk column is the whole reason to install it, at every size, and cost there scales with file count rather than with bytes.</p>
 
     <div class="proof reveal">
       <p class="proof__label">The filesystem's own accounting: <code>btrfs filesystem du</code>, verbatim</p>
@@ -362,7 +362,7 @@ tr.is-headline th,tr.is-headline td{font-weight:700;color:var(--fg)}
    187.00MiB   187.00MiB       0.00B  wt-plain/src    &lt;- git worktree add<!--/bench--></code></pre>
     </div>
 
-    <p class="note reveal" style="margin-top:1.5rem">Provisional figures, measured on the research prototype: <!--bench:env.macos-->Apple M2, 8 cores, macOS 26.6.1, git 2.55.0<!--/bench-->; Linux figures on <!--bench:env.linux-->kernel 7.0.12, git 2.47.3, loopback btrfs and XFS<!--/bench-->. They are re-measured by the benchmark harness in the repository and replaced here at release; <a href="https://github.com/alltuner/git-sprout/tree/main/bench">the harness and its raw output</a> are in the repo.</p>
+    <p class="note reveal" style="margin-top:1.5rem">Provisional figures. The kernel row is measured on the implementation itself, on a dedicated APFS image so nothing else on the machine could contaminate it; the smaller rows are still the research prototype's. Machine: <!--bench:env.macos-->Apple M2, 8 cores, macOS 26.6.1, git 2.55.0<!--/bench-->; Linux figures on <!--bench:env.linux-->kernel 7.0.12, git 2.47.3, loopback btrfs and XFS<!--/bench-->. They are re-measured by the benchmark harness in the repository and replaced here at release; <a href="https://github.com/alltuner/git-sprout/tree/main/bench">the harness and its raw output</a> are in the repo.</p>
   </div>
 </section>
 
@@ -393,7 +393,7 @@ tr.is-headline th,tr.is-headline td{font-weight:700;color:var(--fg)}
   <div class="container">
     <div class="reveal">
       <p class="eyebrow">Compatibility</p>
-      <h2 class="section-title">Indistinguishable from git, except in time and disk.</h2>
+      <h2 class="section-title">Indistinguishable from git, except in time, disk and one timestamp.</h2>
       <!-- TODO(M4): when the differential suite is green, this paragraph becomes the
            verified claim ("verified byte for byte on every release"). Not before. -->
       <p class="lead">This is the contract git-sprout is built to, and the differential test suite is being written to prove it. Until that suite is green, treat the list below as a design promise rather than a result.</p>
@@ -405,11 +405,13 @@ tr.is-headline th,tr.is-headline td{font-weight:700;color:var(--fg)}
       <li>Same files, same modes, same index, compared byte for byte against real <code>git worktree add</code> across a matrix that includes <code>eol</code> conversion, <code>ident</code>, custom filters, LFS, submodules, sparse checkout, split index, SHA-256 repositories and case-insensitive filesystems, where the correct answer is the same set of already-modified paths git itself leaves behind rather than a clean worktree.</li>
       <li>Untracked and ignored files are not copied, exactly as git does not copy them.</li>
       <li><strong>Your repository's configuration is never modified.</strong></li>
-      <li>On a filesystem without block cloning it simply runs <code>git worktree add</code>.</li>
+      <li>On a filesystem without block cloning, or in a repository that converts files on checkout, it simply runs <code>git worktree add</code>.</li>
       <li>Any flag or combination it does not fully understand is not an error. It hands the whole command to git and exits with git's status.</li>
     </ul>
 
-    <p class="note reveal">If you can tell the difference in anything but time and disk, that is a bug, and <a href="https://github.com/alltuner/git-sprout/tree/main/tests/differential">here is the test suite that is supposed to catch it</a>.</p>
+    <p class="note reveal">One difference you can observe: files that were cloned keep the timestamp they had in the checkout they came from, rather than the moment the worktree was created. Nothing git does depends on it, but <code>make</code> and anything else that reads modification times can see it.</p>
+
+    <p class="note reveal">Anything else you can tell apart, beyond time, disk and that timestamp, is a bug, and <a href="https://github.com/alltuner/git-sprout/tree/main/tests/differential">here is the test suite that is supposed to catch it</a>.</p>
   </div>
 </section>
 
@@ -461,7 +463,9 @@ tr.is-headline th,tr.is-headline td{font-weight:700;color:var(--fg)}
 <pre><code>git sprout add ../myrepo-feature -b feature     # or: git worktree-fast add</code></pre>
       </div>
 
-      <p class="note" style="margin-top:1.5rem">Block cloning needs a filesystem that has it: <strong>APFS</strong> on macOS; <strong>btrfs, XFS with reflinks, or bcachefs</strong> on Linux; <strong>a ReFS volume or a Windows 11 Dev Drive</strong> on Windows. Everywhere else (ext4, NTFS) it runs plain <code>git worktree add</code> and you lose nothing but the saving.</p>
+      <p class="note" style="margin-top:1.5rem">Two things have to be true. The filesystem needs block cloning: <strong>APFS</strong> on macOS; <strong>btrfs, XFS with reflinks, or bcachefs</strong> on Linux; <strong>a ReFS volume or a Windows 11 Dev Drive</strong> on Windows. Everywhere else, ext4 and NTFS included, it runs plain <code>git worktree add</code>.</p>
+
+      <p class="note">And the repository has to be one that does not convert files on checkout, because a file can only be shared when checking it out would not rewrite its bytes. Git for Windows turns <code>core.autocrlf</code> on by default, and with that setting there is nothing to share, so on a typical Windows repository sprout passes straight through to <code>git worktree add</code>. The same goes for <code>* text=auto eol=crlf</code> on any platform. Repositories with no conversion attributes clone everything, which is the common case on macOS and Linux, the kernel included.</p>
     </div>
   </div>
 </section>
@@ -552,7 +556,7 @@ git sprout uninstall-shim    # removes it</code></pre>
 
 <div class="divider"></div>
 
-<p class="budget">This page is <!--budget:site.size-->35 KB<!--/budget--> and <!--budget:site.requests-->3<!--/budget--> requests. So is your fifth worktree.</p>
+<p class="budget">This page is <!--budget:site.size-->36 KB<!--/budget--> and <!--budget:site.requests-->3<!--/budget--> requests. So is your fifth worktree.</p>
 
 </main>
 

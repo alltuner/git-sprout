@@ -37,9 +37,16 @@ Or `cargo install git-sprout`, or a binary from [the releases page](https://gith
 git sprout add ../myrepo-feature -b feature     # or: git worktree-fast add
 ```
 
-Block cloning needs a filesystem that has it: **APFS** on macOS; **btrfs, XFS with
-reflinks, or bcachefs** on Linux; **a ReFS volume or a Windows 11 Dev Drive** on Windows.
-Everywhere else (ext4, NTFS) it runs plain `git worktree add`.
+Two things have to be true. The filesystem needs block cloning: **APFS** on macOS; **btrfs,
+XFS with reflinks, or bcachefs** on Linux; **a ReFS volume or a Windows 11 Dev Drive** on
+Windows. Everywhere else, ext4 and NTFS included, it runs plain `git worktree add`.
+
+And the repository has to be one that does not convert files on checkout, because a file can
+only be shared when checking it out would not rewrite its bytes. Git for Windows turns
+`core.autocrlf` on by default, and with that setting there is nothing to share, so on a
+typical Windows repository sprout passes straight through to `git worktree add`. The same
+goes for `* text=auto eol=crlf` on any platform. Repositories with no conversion attributes
+clone everything, which is the common case on macOS and Linux, the kernel included.
 
 ## What is git-sprout?
 
@@ -49,23 +56,23 @@ already have, instead of inflating every blob out of the object store into fresh
 The clone shares disk blocks with the source until something writes to them, so the second
 worktree costs almost nothing until it diverges.
 
-The pitch is disk, not speed. On a small repository the time saving is under a second; on a
-monorepo it is about half the wall clock. The disk saving is close to total at every size,
-and the cost scales with file count rather than with bytes.
+The pitch is disk, not speed. This is not a speed-up: on a small repository it saves under a
+second, and on the kernel the two commands finish within half a second of each other. The disk
+saving is close to total at every size, and cost there scales with file count rather than with
+bytes.
 
 ## The numbers
 
 | workload | `git worktree add` | `git sprout add` |
 | --- | --- | --- |
-| **Linux kernel, <!--bench:kernel.files-->95 056<!--/bench--> files, <!--bench:kernel.bytes-->2.0 GB<!--/bench-->** | **<!--bench:kernel.time.git-->11.58s<!--/bench--> · <!--bench:kernel.disk.git-->1805 MB<!--/bench-->** | **<!--bench:kernel.time.sprout-->5.46s<!--/bench--> · <!--bench:kernel.disk.sprout-->43 MB<!--/bench-->** |
+| **Linux kernel, <!--bench:kernel.files-->95 056<!--/bench--> files, <!--bench:kernel.bytes-->2.0 GB<!--/bench-->** | **<!--bench:kernel.time.git-->11.06s<!--/bench--> · <!--bench:kernel.disk.git-->1814 MB<!--/bench-->** | **<!--bench:kernel.time.sprout-->11.51s<!--/bench--> · <!--bench:kernel.disk.sprout-->44 MB<!--/bench-->** |
 | 250 MB, 2000 files | <!--bench:medium.time.git-->0.85s<!--/bench--> · <!--bench:medium.disk.git-->251 MB<!--/bench--> | <!--bench:medium.time.sprout-->0.21s<!--/bench--> · <!--bench:medium.disk.sprout-->~0 MB<!--/bench--> |
 | 188 MB, 3000 files, source 6 commits behind | <!--bench:cross.time.git-->0.83s<!--/bench--> · <!--bench:cross.disk.git-->187 MB<!--/bench--> | <!--bench:cross.time.sprout-->0.15s<!--/bench--> · <!--bench:cross.disk.sprout-->~1.5 MB<!--/bench--> |
 | btrfs, 188 MB | <!--bench:btrfs.time.git-->0.33s<!--/bench--> · <!--bench:btrfs.disk.git-->187 MB<!--/bench--> | <!--bench:btrfs.time.sprout-->0.05s<!--/bench--> · <!--bench:btrfs.disk.sprout-->0.1 MB<!--/bench--> |
 | ext4 (no block cloning) | <!--bench:ext4.time.git-->0.41s<!--/bench--> · <!--bench:ext4.disk.git-->187 MB<!--/bench--> | falls back, identical |
 
-One worktree of the Linux kernel:
-<!--bench:kernel.disk.ratio-->42x<!--/bench--> less disk and about half the wall clock.
-That is <!--bench:kernel.disk.saved-->1.76 GB<!--/bench--> that never gets allocated every
+One worktree of the Linux kernel: <!--bench:kernel.disk.ratio-->41x<!--/bench--> less disk, and
+no meaningful difference in wall clock. That is <!--bench:kernel.disk.saved-->1.73 GB<!--/bench--> that never gets allocated every
 time anyone creates one. Ten engineers with five worktrees each is
 <!--bench:fleet.disk.git-->90 GB<!--/bench--> of kernel checkouts on git, and about
 <!--bench:fleet.disk.sprout-->2 GB<!--/bench--> on sprout.
@@ -79,7 +86,8 @@ The filesystem's own accounting, verbatim:
    187.00MiB   187.00MiB       0.00B  wt-plain/src    <- git worktree add<!--/bench-->
 ```
 
-Provisional figures, measured on the research prototype:
+Provisional figures. The kernel row is measured on the implementation itself, on a dedicated
+APFS image; the smaller rows are still the research prototype's. Machine:
 <!--bench:env.macos-->Apple M2, 8 cores, macOS 26.6.1, git 2.55.0<!--/bench-->; Linux
 figures on <!--bench:env.linux-->kernel 7.0.12, git 2.47.3, loopback btrfs and XFS<!--/bench-->.
 The harness in [`bench/`](bench/) re-measures them and rewrites this table.
@@ -87,8 +95,9 @@ The harness in [`bench/`](bench/) re-measures them and rewrites this table.
 ## Compatibility
 
 `git sprout add` is meant to be indistinguishable from `git worktree add` in every
-observable way except time and disk. That is the contract, and the differential suite in
-[`tests/differential/`](tests/differential/) is being written to prove it.
+observable way except time, disk and one timestamp. That is the contract, and the
+differential suite in [`tests/differential/`](tests/differential/) is being written to
+prove it.
 
 - Same flags, same output on stdout and stderr, same exit codes.
 - Same hooks, in the same order, with the same arguments.
@@ -99,11 +108,16 @@ observable way except time and disk. That is the contract, and the differential 
   already-modified paths git itself leaves behind rather than a clean worktree.
 - Untracked and ignored files are not copied, exactly as git does not copy them.
 - **Your repository's configuration is never modified.**
-- On a filesystem without block cloning it simply runs `git worktree add`.
+- On a filesystem without block cloning, or in a repository that converts files on checkout,
+  it simply runs `git worktree add`.
 - Any flag or combination it does not fully understand is not an error. It hands the whole
   command to git and exits with git's status.
 
-If you can tell the difference in anything but time and disk, that's a bug.
+One difference you can observe: files that were cloned keep the timestamp they had in the
+checkout they came from, rather than the moment the worktree was created. Nothing git does
+depends on it, but `make` and anything else that reads modification times can see it.
+
+Anything else you can tell apart, beyond time, disk and that timestamp, is a bug.
 
 ## Make it automatic
 
