@@ -29,6 +29,17 @@ pub fn compare(control: &Snapshot, candidate: &Snapshot) -> Vec<Difference> {
 
     d.text("stdout", &control.stdout, &candidate.stdout);
     d.text("stderr", &control.stderr, &candidate.stderr);
+    for (label, frames) in [
+        ("control", &control.malformed_progress),
+        ("candidate", &candidate.malformed_progress),
+    ] {
+        if !frames.is_empty() {
+            d.push(
+                "progress",
+                format!("{label} wrote progress frames git would not: {frames:?}"),
+            );
+        }
+    }
     if control.timed_out || candidate.timed_out {
         d.push(
             "hang",

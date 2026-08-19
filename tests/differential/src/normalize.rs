@@ -46,20 +46,67 @@ impl Normaliser {
         String::from_utf8_lossy(&self.bytes(input)).into_owned()
     }
 
-    /// stderr as a terminal would render it, minus the harness's own instrument.
+    /// stderr as a terminal would render it, minus the harness's own instrument and
+    /// minus git's checkout progress meter.
     ///
-    /// Two adjustments, both of which drop something that is not part of the output:
-    /// any `sprout-stats:` line, which the harness asked for; and the intermediate
-    /// frames of git's progress meter, which are separated by carriage returns and
-    /// land at whatever percentages the scheduler happened to allow. The final frame
-    /// is kept, so `Updating files: 100% (95056/95056), done.` is still compared and
-    /// a checkout that touched a different number of paths is still a difference.
+    /// The `sprout-stats:` lines are dropped because the harness asked for them.
+    ///
+    /// The progress meter is dropped because §3.2's "byte for byte" cannot mean it.
+    /// Git starts the meter only once a checkout has run for about two seconds, so
+    /// whether it appears at all depends on the wall clock: two consecutive runs of
+    /// real `git worktree add` on the kernel produced 124 and 118 frames, and a run
+    /// fast enough produces none. A tool that leaves git almost nothing to write
+    /// therefore never triggers it — the divergence is what success looks like.
+    /// Everything else on stderr is still compared exactly; see
+    /// [`Normaliser::malformed_progress`] for what is checked instead.
     pub fn stderr(&self, input: &[u8]) -> String {
         self.text(input)
             .lines()
             .filter(|line| !line.starts_with(STDERR_PREFIX))
-            .map(|line| format!("{}\n", last_frame(line)))
+            .map(last_frame)
+            .filter(|line| !is_progress(line))
+            .map(|line| format!("{line}\n"))
             .collect()
+    }
+
+    /// Progress frames that do not look like git's, so exempting the meter narrows
+    /// the comparison rather than blinding it: anything else written where progress
+    /// belongs is still a difference.
+    pub fn malformed_progress(&self, input: &[u8]) -> Vec<String> {
+        self.text(input)
+            .lines()
+            .flat_map(|line| line.split('\r').map(str::to_string).collect::<Vec<_>>())
+            .filter(|frame| is_progress(frame) && !is_wellformed_progress(frame))
+            .collect()
+    }
+}
+
+/// A frame of git's checkout progress meter.
+fn is_progress(line: &str) -> bool {
+    line.starts_with("Updating files: ")
+}
+
+/// `Updating files:  47% (44676/95056)`, optionally finished with `, done.`
+fn is_wellformed_progress(frame: &str) -> bool {
+    let rest = frame.trim_start_matches("Updating files: ").trim_start();
+    let Some((percent, rest)) = rest.split_once('%') else {
+        return false;
+    };
+    if percent.is_empty() || !percent.chars().all(|c| c.is_ascii_digit()) {
+        return false;
+    }
+    let rest = rest.trim_start().trim_end_matches(", done.");
+    let Some(counts) = rest.strip_prefix('(').and_then(|r| r.strip_suffix(')')) else {
+        return false;
+    };
+    match counts.split_once('/') {
+        Some((done, total)) => {
+            !done.is_empty()
+                && !total.is_empty()
+                && done.chars().all(|c| c.is_ascii_digit())
+                && total.chars().all(|c| c.is_ascii_digit())
+        }
+        None => false,
     }
 }
 

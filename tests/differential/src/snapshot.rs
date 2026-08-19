@@ -68,6 +68,8 @@ impl AdminEntry {
 
 #[derive(Debug, Clone)]
 pub struct Snapshot {
+    /// Progress frames that do not match git's shape; always empty in a correct run.
+    pub malformed_progress: Vec<String>,
     pub label: &'static str,
     pub stdout: String,
     pub stderr: String,
@@ -108,6 +110,7 @@ pub fn capture(
         label: side.label,
         stdout: norm.text(&output.stdout),
         stderr: norm.stderr(&output.stderr),
+        malformed_progress: norm.malformed_progress(&output.stderr),
         status: output.status,
         timed_out: output.timed_out,
         hooks: output
