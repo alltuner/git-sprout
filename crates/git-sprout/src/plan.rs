@@ -36,6 +36,10 @@ pub struct Verified {
 pub struct Plan {
     /// Subtrees to clone in a single call, topmost only, in tree order.
     pub directories: Vec<Vec<u8>>,
+    /// Every directory those clones put on disk, roots included. A clone copies the
+    /// source's permissions, so each of these needs the ones a checkout would have given
+    /// it.
+    pub directories_created: Vec<Vec<u8>>,
     /// Paths to clone one at a time, because no chosen directory covers them.
     pub files: Vec<Planned>,
     /// Every path the plan materialises, including those inside a cloned directory.
@@ -177,6 +181,14 @@ pub fn assemble(
             }
             let mut prefix = path.clone();
             prefix.push(b'/');
+            plan.directories_created.push(path.clone());
+            plan.directories_created.extend(
+                target
+                    .trees
+                    .range(prefix.clone()..)
+                    .take_while(|(under, _)| under.starts_with(&prefix))
+                    .map(|(under, _)| under.clone()),
+            );
             covered.push(prefix);
             plan.directories.push(path.clone());
         }

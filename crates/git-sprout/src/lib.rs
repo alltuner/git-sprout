@@ -56,5 +56,21 @@ fn decline(add: &AddCommand) -> Option<String> {
     if add.orphan {
         return Some("--orphan".to_string());
     }
+    if head_is_unborn(add) {
+        return Some("no commits yet".to_string());
+    }
     None
+}
+
+/// True when the repository has no commit for HEAD to name.
+///
+/// Git infers `--orphan` for itself in that situation, without the flag ever
+/// appearing in argv, and then refuses to combine its own inference with the
+/// `--no-checkout` this tool relies on. Declining here keeps the request on
+/// git's own path, where it succeeds.
+fn head_is_unborn(add: &AddCommand) -> bool {
+    add.commit_ish.is_none()
+        && git::Git::new(add.globals.clone())
+            .capture(None, ["rev-parse", "--verify", "--quiet", "HEAD"])
+            .is_ok_and(|output| output.is_empty())
 }

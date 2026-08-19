@@ -14,6 +14,7 @@ use gix_index::fs::Metadata;
 use crate::argv::AddCommand;
 use crate::attributes::{self, LineEndings};
 use crate::clone::{self, BlockCloner};
+use crate::delegate;
 use crate::git::Git;
 use crate::interrupt;
 use crate::plan::{self, as_path, Planned};
@@ -22,6 +23,10 @@ use crate::source;
 use crate::stats::Stats;
 use crate::tree;
 use crate::verify;
+
+/// The tree modes that need naming rather than a magic number.
+const EXECUTABLE_MODE: u32 = 0o100755;
+const SYMLINK_MODE: u32 = 0o120000;
 
 /// The most paths worth naming on one `git diff-files` command line.
 const RACY_PATH_LIMIT: usize = 1000;
@@ -33,6 +38,18 @@ const CONVERSION_KEYS: &[&str] = &["core.autocrlf", "core.eol", "core.symlinks"]
 /// Creates the worktree, cloning what it can and letting git finish the job.
 pub fn add(command: &AddCommand, stats: &mut Stats) -> ExitCode {
     let git = Git::new(command.globals.clone());
+
+    // Git infers `--orphan` for itself when the repository has no commit to branch from,
+    // and then rejects the `--no-checkout` step 2 would add. An unborn HEAD is therefore
+    // the same case as an explicit `--orphan` and goes to git untouched.
+    if git
+        .capture(None, ["rev-parse", "--verify", "--quiet", "HEAD"])
+        .is_err()
+    {
+        stats.fall_back("the repository has no commit on HEAD");
+        stats.emit();
+        return delegate::exec_git(&command.git_args());
+    }
 
     let before = worktrees(&git);
     let created = match git.passthrough(None, command.worktree_add_args_no_checkout()) {
@@ -435,6 +452,7 @@ fn materialise(
     plan: &plan::Plan,
 ) -> (Vec<Record>, Option<String>) {
     let mut demotion = None;
+    let umask = umask();
 
     for directory in &plan.directories {
         if interrupt::requested() {
@@ -475,12 +493,18 @@ fn materialise(
         }
     }
 
+    if demotion.is_none() {
+        for directory in &plan.directories_created {
+            set_mode(&destination.join(as_path(directory)), directory_mode(umask));
+        }
+    }
+
     let records = plan
         .materialised
         .iter()
         .filter_map(|planned| {
             let target = destination.join(as_path(&planned.path));
-            settle_time(&target, planned).map(|stat| Record {
+            conform_to_checkout(&target, planned, umask).map(|stat| Record {
                 path: planned.path.clone(),
                 mode: planned.mode,
                 oid: planned.oid,
@@ -523,26 +547,90 @@ fn symlink(_target: &Path, _link: &Path) -> io::Result<()> {
     Err(io::Error::from(io::ErrorKind::Unsupported))
 }
 
-/// Gives the clone the source file's modification time and returns its stat data.
+/// Gives the clone the permissions and modification time a checkout would have produced,
+/// and returns the stat data that describes it afterwards.
 ///
-/// Git treats an index entry whose mtime is not older than the index file's own mtime as
-/// racily clean and re-reads the file, which would undo the whole point of cloning. A
-/// clone carrying the source's mtime is comfortably older than the index we are about to
-/// write. `clonefile` already copies timestamps; the reflink primitives do not.
-fn settle_time(path: &Path, planned: &Planned) -> Option<Stat> {
+/// A block clone copies the source's permission bits along with its blocks, but a checkout
+/// derives them from the tree: `0777` for an executable and `0666` otherwise, each masked
+/// by the process umask. So a source file somebody ran `chmod 600` on, or that a filter
+/// created under a different umask, arrives with permissions git would never have written.
+/// Spec §6.1 puts it plainly — take modes from the tree, never from `stat`.
+///
+/// The modification time is set for a different reason. Git treats an index entry whose
+/// mtime is not older than the index file's own mtime as racily clean and re-reads the
+/// file, which would undo the whole point of cloning. A clone carrying the source's mtime
+/// is comfortably older than the index we are about to write. `clonefile` already copies
+/// timestamps; the reflink primitives do not.
+///
+/// Permissions are set first: changing them moves ctime, and the stat data has to describe
+/// the file as it is finally left.
+fn conform_to_checkout(path: &Path, planned: &Planned, umask: u32) -> Option<Stat> {
+    if planned.mode != SYMLINK_MODE {
+        set_mode(path, checkout_mode(planned.mode, umask));
+    }
     let wanted = FileTime::from_unix_time(i64::from(planned.mtime.secs), planned.mtime.nsecs);
     let mut metadata = Metadata::from_path_no_follow(path).ok()?;
-    let current = Stat::from_fs(&metadata).ok()?;
-    if current.mtime != planned.mtime {
+    if Stat::from_fs(&metadata).ok()?.mtime != planned.mtime {
         filetime::set_symlink_file_times(path, wanted, wanted).ok()?;
         metadata = Metadata::from_path_no_follow(path).ok()?;
     }
     Stat::from_fs(&metadata).ok()
 }
 
+/// The permissions a checkout gives a path with this tree mode.
+fn checkout_mode(mode: u32, umask: u32) -> u32 {
+    let base = if mode == EXECUTABLE_MODE {
+        0o777
+    } else {
+        0o666
+    };
+    base & !umask
+}
+
+/// The permissions a checkout gives a directory it has to create.
+fn directory_mode(umask: u32) -> u32 {
+    0o777 & !umask
+}
+
+#[cfg(unix)]
+fn set_mode(path: &Path, mode: u32) {
+    use std::os::unix::fs::PermissionsExt;
+    let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode));
+}
+
+#[cfg(not(unix))]
+fn set_mode(_path: &Path, _mode: u32) {}
+
+/// The process umask, read the only way the C library allows: by setting it and putting it
+/// back. Nothing else in the process creates files while this runs.
+#[cfg(unix)]
+fn umask() -> u32 {
+    // SAFETY: single-threaded at this point, so no other file creation can see the gap.
+    unsafe {
+        let previous = libc::umask(0);
+        libc::umask(previous);
+        u32::from(previous)
+    }
+}
+
+#[cfg(not(unix))]
+fn umask() -> u32 {
+    0
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn permissions_come_from_the_tree_and_the_umask() {
+        assert_eq!(checkout_mode(0o100644, 0o022), 0o644);
+        assert_eq!(checkout_mode(0o100755, 0o022), 0o755);
+        assert_eq!(checkout_mode(0o100644, 0o077), 0o600);
+        assert_eq!(checkout_mode(0o100755, 0o077), 0o700);
+        assert_eq!(checkout_mode(0o100644, 0o000), 0o666);
+        assert_eq!(directory_mode(0o022), 0o755);
+    }
 
     #[test]
     fn applies_every_dash_c_in_order() {

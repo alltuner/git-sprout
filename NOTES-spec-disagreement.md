@@ -146,6 +146,21 @@ which is slow rather than wrong.
   version 2 even in a repository configured for `index.version=4`. Observable, and caught by
   comparing the two indexes. Handled by computing the version git would pick and declining
   to accelerate when it is not 2.
+- **§4 step 1 lists `--orphan` as an argv condition, but git infers it without the flag.** In a
+  repository with no commits, `git worktree add` prints "No possible source branch, inferring
+  '--orphan'" and proceeds — so an argv scan never fires, step 2 adds `--no-checkout`, and git
+  rejects the combination it just inferred with `fatal: options '--orphan' and '--no-checkout'
+  cannot be used together`. No worktree, exit 128, where git succeeds. Every plain `add` in a
+  fresh `git init` hits it. An unborn HEAD has to be a delegation condition in its own right.
+- **§6.1's "take modes from the tree, never from `stat`" applies to the file on disk, not only
+  to the index entry, and it is not a Windows concern.** A block clone copies the source's
+  permission bits with its blocks, so a source file somebody ran `chmod 600` on arrives with
+  permissions git would never have written. It applies to directories too: a subtree clone
+  carries the source directory's mode. Worth stating exactly what a checkout writes, because
+  it is not the tree's `0644`/`0755` — git opens with `0666`, or `0777` when the tree marks
+  the path executable, and lets the umask do the rest. Under `umask 027` that is `0640` and
+  `0750`, and the executable bit is masked independently of the read bits, so the value has
+  to come from the real umask rather than from probing a file git created.
 - **§3.3 does not mention that `git worktree add` propagates the `post-checkout` hook's exit
   status.** Measured: a hook exiting 7 makes `git worktree add` exit 7. `git hook run` does
   the same, so firing the hook last and exiting with its status reproduces it.
