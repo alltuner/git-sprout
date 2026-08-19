@@ -58,7 +58,9 @@ def read_records(raw: Path) -> list[dict[str, Any]]:
     return [json.loads(line) for line in raw.read_text().splitlines() if line.strip()]
 
 
-def side_report(samples: list[dict[str, Any]], command: dict[str, Any] | None) -> dict[str, Any]:
+def side_report(
+    samples: list[dict[str, Any]], command: dict[str, Any] | None
+) -> dict[str, Any]:
     oids = sorted({s["tree_oid"] for s in samples})
     return {
         "tool": (command or {}).get("tool"),
@@ -115,7 +117,9 @@ def scenario_report(
     sides: dict[str, Any] = {}
     for side in SIDES:
         samples = [r for r in mine if r["kind"] == "sample" and r["side"] == side]
-        command = next((r for r in mine if r["kind"] == "command" and r["side"] == side), None)
+        command = next(
+            (r for r in mine if r["kind"] == "command" and r["side"] == side), None
+        )
         if samples:
             sides[side] = side_report(samples, command)
     report["sides"] = sides
@@ -164,7 +168,9 @@ def build(raw: Path, merges: list[Path]) -> dict[str, Any]:
     meta = next(r for r in records if r["kind"] == "meta")
     others = [json.loads(path.read_text()) for path in merges]
     provisional = bool(meta["provisional"]) or any(o["provisional"] for o in others)
-    baseline_only = bool(meta["baseline_only"]) or any(o["baseline_only"] for o in others)
+    baseline_only = bool(meta["baseline_only"]) or any(
+        o["baseline_only"] for o in others
+    )
 
     machine = {
         "cpu": meta["cpu"],
@@ -203,8 +209,12 @@ def build(raw: Path, merges: list[Path]) -> dict[str, Any]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--raw", required=True, type=Path, help="NDJSON written by run.sh")
-    parser.add_argument("--out", required=True, type=Path, help="where to write bench.json")
+    parser.add_argument(
+        "--raw", required=True, type=Path, help="NDJSON written by run.sh"
+    )
+    parser.add_argument(
+        "--out", required=True, type=Path, help="where to write bench.json"
+    )
     parser.add_argument(
         "--merge",
         action="append",

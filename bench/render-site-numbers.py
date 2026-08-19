@@ -16,7 +16,14 @@ from typing import Any
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_REPORT = REPO_ROOT / "bench" / "results.json"
 
-SCENARIOS: list[str] = ["kernel", "same-commit", "cross-commit", "no-match", "btrfs", "ext4"]
+SCENARIOS: list[str] = [
+    "kernel",
+    "same-commit",
+    "cross-commit",
+    "no-match",
+    "btrfs",
+    "ext4",
+]
 SIDES: list[str] = ["git", "sprout"]
 
 NOT_MEASURED = "not measured"
@@ -62,13 +69,17 @@ REQUIRED: dict[str, list[str]] = {
     ],
 }
 
-SPAN_RE = re.compile(r"<!--bench:(?!region\b)([A-Za-z0-9_.\-]+)-->(.*?)<!--/bench-->", re.S)
-REGION_RE = re.compile(r"<!--bench:region-->(.*?)<!--/bench:region-->", re.S)
-TAG_WITH_ATTR_RE = re.compile(r"<[^<>]*\bdata-bench-[^<>]*>", re.S)
+SPAN_RE = re.compile(
+    r"<!--bench:(?!region\b)([A-Za-z0-9_.\-]+)-->(.*?)<!--/bench-->", re.DOTALL
+)
+REGION_RE = re.compile(r"<!--bench:region-->(.*?)<!--/bench:region-->", re.DOTALL)
+TAG_WITH_ATTR_RE = re.compile(r"<[^<>]*\bdata-bench-[^<>]*>", re.DOTALL)
 ATTR_RE = re.compile(r'data-bench-([A-Za-z][A-Za-z0-9\-]*)="([A-Za-z0-9_.\-]+)"')
-COMMENT_RE = re.compile(r"<!--.*?-->", re.S)
-TAG_RE = re.compile(r"<[^<>]*>", re.S)
-SHAPE_RE = re.compile(r"<(?:rect|circle|line|polygon|polyline|path)\b[^<>]*>", re.I)
+COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
+TAG_RE = re.compile(r"<[^<>]*>", re.DOTALL)
+SHAPE_RE = re.compile(
+    r"<(?:rect|circle|line|polygon|polyline|path)\b[^<>]*>", re.IGNORECASE
+)
 DIGITS_RE = re.compile(r"\d")
 
 
@@ -183,12 +194,22 @@ def build_keys(report: dict[str, Any]) -> dict[str, str]:
         keys[f"{name}.status"] = (scenario or {}).get("status", "missing")
         keys[f"{name}.skip_reason"] = (scenario or {}).get("skip_reason") or ""
 
-        largest_disk = max(
-            (sides.get(s, {}).get("disk_mb", {}).get("median", 0) or 0) for s in SIDES
-        ) if sides else 0
-        largest_time = max(
-            (sides.get(s, {}).get("time_s", {}).get("median", 0) or 0) for s in SIDES
-        ) if sides else 0
+        largest_disk = (
+            max(
+                (sides.get(s, {}).get("disk_mb", {}).get("median", 0) or 0)
+                for s in SIDES
+            )
+            if sides
+            else 0
+        )
+        largest_time = (
+            max(
+                (sides.get(s, {}).get("time_s", {}).get("median", 0) or 0)
+                for s in SIDES
+            )
+            if sides
+            else 0
+        )
 
         for side in SIDES:
             data = sides.get(side, {})
@@ -198,7 +219,9 @@ def build_keys(report: dict[str, Any]) -> dict[str, str]:
             status_s = data.get("first_status_s", {}).get("median") if ok else None
 
             keys[f"{name}.{side}.time_s"] = NOT_EXERCISED if blank else fmt_time(time_s)
-            keys[f"{name}.{side}.disk_mb"] = NOT_EXERCISED if blank else fmt_disk(disk_mb)
+            keys[f"{name}.{side}.disk_mb"] = (
+                NOT_EXERCISED if blank else fmt_disk(disk_mb)
+            )
             keys[f"{name}.{side}.first_status_s"] = (
                 NOT_EXERCISED if blank else fmt_time(status_s)
             )
@@ -212,10 +235,14 @@ def build_keys(report: dict[str, Any]) -> dict[str, str]:
                 )
             )
             keys[f"{name}.{side}.tree_oid"] = (
-                NOT_EXERCISED if blank else fmt_oid(data.get("tree_oid") if ok else None)
+                NOT_EXERCISED
+                if blank
+                else fmt_oid(data.get("tree_oid") if ok else None)
             )
             keys[f"{name}.{side}.dirty_paths"] = (
-                NOT_EXERCISED if blank else fmt_count(data.get("dirty_paths") if ok else None)
+                NOT_EXERCISED
+                if blank
+                else fmt_count(data.get("dirty_paths") if ok else None)
             )
             keys[f"{name}.{side}.disk_pct"] = (
                 "0%" if blank else fmt_pct(disk_mb, largest_disk)
@@ -303,16 +330,20 @@ def unmarked_numbers(text: str) -> list[str]:
 def process(path: Path, relative: str, keys: dict[str, str], write: bool) -> list[str]:
     problems: list[str] = []
     if not path.exists():
-        return [f"{relative}: missing; it must carry these markers: {', '.join(REQUIRED[relative])}"]
+        return [
+            f"{relative}: missing; it must carry these markers: {', '.join(REQUIRED[relative])}"
+        ]
 
     original = path.read_text()
-    if original.count("<!--bench:") - original.count("<!--bench:region-->") != original.count(
-        "<!--/bench-->"
-    ):
+    if original.count("<!--bench:") - original.count(
+        "<!--bench:region-->"
+    ) != original.count("<!--/bench-->"):
         problems.append(f"{relative}: unbalanced bench markers")
 
     updated, seen, unknown = rewrite(original, keys)
-    problems += [f"{relative}: unknown marker key '{key}'" for key in sorted(set(unknown))]
+    problems += [
+        f"{relative}: unknown marker key '{key}'" for key in sorted(set(unknown))
+    ]
     problems += [
         f"{relative}: required marker '{key}' is missing"
         for key in REQUIRED[relative]
@@ -332,13 +363,20 @@ def process(path: Path, relative: str, keys: dict[str, str], write: bool) -> lis
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--from", dest="source", type=Path, default=DEFAULT_REPORT)
-    parser.add_argument("--check", action="store_true", help="validate markers, write nothing")
-    parser.add_argument("--print-keys", action="store_true", help="dump every key and its value")
+    parser.add_argument(
+        "--check", action="store_true", help="validate markers, write nothing"
+    )
+    parser.add_argument(
+        "--print-keys", action="store_true", help="dump every key and its value"
+    )
     parser.add_argument("--target", action="append", help="check only these targets")
     args = parser.parse_args()
 
     if not args.source.exists():
-        print(f"bench: no report at {args.source}; run `just bench` first", file=sys.stderr)
+        print(
+            f"bench: no report at {args.source}; run `just bench` first",
+            file=sys.stderr,
+        )
         return 1
 
     report = json.loads(args.source.read_text())
