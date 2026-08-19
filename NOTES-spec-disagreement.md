@@ -97,6 +97,48 @@ Whichever is chosen, §3.4 and `language.md`'s "Does Rust get us Windows?" secti
 rewriting, and §8's repository matrix should assert `cloned > 0` on the `core.autocrlf=true`
 fixture — which it already says to do, and which is what would have caught this.
 
+## §3.5.1: the construction the spec recommends does not settle case collisions
+
+### The claim
+
+> The clone plan must not create a file git would not have created, and must not win a
+> collision that git would have lost. **The safest construction is the one in §4: clone only
+> what the plan says, then let git's own checkout run last and settle every collision
+> itself.**
+
+### Why it is not enough
+
+Git's checkout writes entries in index order and each write unlinks and recreates the shared
+file, so on a case-folding filesystem the *last* entry written decides both the content and
+the name on disk, and the earlier one is reported modified. Letting git run last only settles
+collisions among the paths git actually writes — and git skips everything the scratch index
+already vouches for.
+
+Measured on the kernel fixture, `bd5f485f3`, case-insensitive APFS. In each colliding pair
+only one member is stat-clean in the source (the one whose blob is on disk), so the plan
+naturally contains exactly one of the two. Cloning it makes it the *first* writer, and git
+then writes the other one last, inverting the winner:
+
+| | on disk | content of `xt_CONNMARK.h` | dirty set |
+| --- | --- | --- | --- |
+| `git worktree add` | `xt_connmark.h` | `41b578cc` (lowercase's blob) | the 13 **uppercase** names |
+| clone-then-let-git-finish | `xt_CONNMARK.h` | `36cc956e` (uppercase's blob) | the 13 **lowercase** names |
+
+Thirteen paths wrong, `git status` clean-looking on both sides, and both worktrees report
+exactly 13 modified paths — so any test that counts the dirty set instead of comparing it
+passes. §8 already says to compare it, which is what caught this.
+
+### What is implemented
+
+`plan::colliding_paths` groups every tracked path by an ASCII-folded key and drops whole
+groups, so neither member is ever cloned and git writes both in its own order. Cost on the
+kernel: 26 paths out of 95,056. Result is byte-identical to the control, including the name
+on disk and which 13 paths are reported modified.
+
+A filesystem that folds beyond ASCII, as APFS does for Unicode, can still collide on paths
+this leaves in the plan. There the second clone fails with `EEXIST` and demotes the run,
+which is slow rather than wrong.
+
 ## Smaller things that are underspecified rather than wrong
 
 - **§4 step 6 says "Version 2 (or 3 if any entry needs extended flags)".** Git keeps the

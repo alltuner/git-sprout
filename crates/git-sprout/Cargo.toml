@@ -27,7 +27,7 @@ gix-index = "0.54.0"
 reflink-copy = "0.1.30"
 serde_json = { version = "1", default-features = false, features = ["std"] }
 
-[target.'cfg(target_os = "macos")'.dependencies]
+[target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
 [dev-dependencies]

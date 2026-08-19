@@ -15,6 +15,7 @@ use crate::argv::AddCommand;
 use crate::attributes::{self, LineEndings};
 use crate::clone::{self, BlockCloner};
 use crate::git::Git;
+use crate::interrupt;
 use crate::plan::{self, as_path, Planned};
 use crate::scratch_index::{self, Record};
 use crate::source;
@@ -51,7 +52,8 @@ pub fn add(command: &AddCommand, stats: &mut Stats) -> ExitCode {
 
     // From here on the worktree exists but holds no files, so every remaining step is
     // best effort and step 7 must run whatever happens. A panic in the clone phase would
-    // otherwise leave a half-populated worktree behind.
+    // or an interrupt would otherwise leave a half-populated worktree behind.
+    interrupt::defer();
     if let Some(destination) = destination.as_deref() {
         let reporting = std::panic::take_hook();
         std::panic::set_hook(Box::new(|_| {}));
@@ -70,10 +72,13 @@ pub fn add(command: &AddCommand, stats: &mut Stats) -> ExitCode {
     stats.emit();
 
     let Some(destination) = destination else {
+        interrupt::honour();
         return ExitCode::SUCCESS;
     };
 
-    finish(&git, &destination, command.quiet)
+    let code = finish(&git, &destination, command.quiet);
+    interrupt::honour();
+    code
 }
 
 /// Steps 7 and 8: git writes whatever is missing and the real index, then the checkout
@@ -261,13 +266,15 @@ fn populate(git: &Git, destination: &Path, before: &[source::Worktree], stats: &
     let dirty_attributes: Vec<Vec<u8>> = changed_paths(git, &source, &suspect_attributes)
         .into_iter()
         .collect();
-    let poisoned = verify::poisoned_prefixes(
+    let mut poisoned = verify::poisoned_prefixes(
         &target.attribute_files(),
         &source_attributes,
         &dirty_attributes,
     );
+    let (colliding, colliding_prefixes) = plan::colliding_paths(&target);
+    poisoned.extend(colliding_prefixes);
 
-    let mut verified = plan::verify_paths(&target, &source_index, &source, &poisoned);
+    let mut verified = plan::verify_paths(&target, &source_index, &source, &poisoned, &colliding);
     let considered = verified.considered;
     let racy_paths: Vec<Vec<u8>> = verified
         .racy
@@ -430,6 +437,10 @@ fn materialise(
     let mut demotion = None;
 
     for directory in &plan.directories {
+        if interrupt::requested() {
+            demotion = Some("interrupted".to_string());
+            break;
+        }
         let target = destination.join(as_path(directory));
         if let Some(parent) = target.parent() {
             let _ = std::fs::create_dir_all(parent);
@@ -443,6 +454,10 @@ fn materialise(
 
     if demotion.is_none() {
         for planned in &plan.files {
+            if interrupt::requested() {
+                demotion = Some("interrupted".to_string());
+                break;
+            }
             let target = destination.join(as_path(&planned.path));
             if let Some(parent) = target.parent() {
                 let _ = std::fs::create_dir_all(parent);

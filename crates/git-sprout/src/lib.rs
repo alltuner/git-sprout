@@ -9,6 +9,7 @@ pub mod attributes;
 pub mod clone;
 pub mod delegate;
 pub mod git;
+pub mod interrupt;
 pub mod plan;
 pub mod scratch_index;
 pub mod source;

@@ -42,12 +42,58 @@ pub struct Plan {
     pub materialised: Vec<Planned>,
 }
 
+/// The paths and subtrees a filesystem that folds case cannot keep apart.
+///
+/// Where two tracked paths differ only by case, only one file can exist, and real
+/// `git worktree add` settles which by checking every entry out in index order: the last
+/// one written unlinks and recreates the shared file, so it decides both the name on disk
+/// and the content, and the other path is reported modified. Cloning even one member wins
+/// a collision git would have lost, which spec §3.5.1 forbids, and inverts the dirty set.
+/// So a whole group goes to git, which settles it exactly as it always would.
+///
+/// The fold is ASCII, which is what git's own case-insensitive comparisons use. A
+/// filesystem that also folds beyond ASCII, as APFS does, can still collide on paths this
+/// leaves in the plan; the clone of the second one fails and demotes the run, which is
+/// slow rather than wrong.
+///
+/// On a case-sensitive filesystem this costs a handful of paths and changes nothing else.
+pub fn colliding_paths(target: &Listing) -> (HashSet<Vec<u8>>, Vec<Vec<u8>>) {
+    let mut by_folded: HashMap<Vec<u8>, Vec<&Vec<u8>>> = HashMap::new();
+    let named = target
+        .blobs
+        .keys()
+        .chain(target.trees.keys())
+        .chain(target.gitlinks.iter());
+    for path in named {
+        by_folded
+            .entry(path.to_ascii_lowercase())
+            .or_default()
+            .push(path);
+    }
+
+    let mut paths = HashSet::new();
+    let mut prefixes = Vec::new();
+    for (_, group) in by_folded.into_iter().filter(|(_, group)| group.len() > 1) {
+        for path in group {
+            if target.trees.contains_key(path) {
+                let mut prefix = path.clone();
+                prefix.push(b'/');
+                prefixes.push(prefix);
+            }
+            paths.insert(path.clone());
+        }
+    }
+    prefixes.sort();
+    (paths, prefixes)
+}
+
 /// Applies every check that does not depend on git re-reading a file's content.
 pub fn verify_paths(
     target: &Listing,
     source_index: &gix_index::File,
     source_root: &Path,
     poisoned: &[Vec<u8>],
+    excluded: &HashSet<Vec<u8>>,
 ) -> Verified {
     let mut verified = Verified {
         considered: target.blobs.len(),
@@ -56,7 +102,7 @@ pub fn verify_paths(
     let timestamp = source_index.timestamp();
 
     for (path, blob) in &target.blobs {
-        if verify::is_poisoned(path, poisoned) {
+        if excluded.contains(path) || verify::is_poisoned(path, poisoned) {
             continue;
         }
         let Some(entry) = source_index.entry_by_path(path.as_slice().into()) else {
@@ -356,6 +402,45 @@ mod tests {
             b"src",
             &HashSet::new()
         ));
+    }
+
+    #[test]
+    fn paths_that_differ_only_by_case_all_go_to_git() {
+        let listing = listing(
+            &[
+                ("net/xt_MARK.c", 1),
+                ("net/xt_mark.c", 2),
+                ("net/other.c", 3),
+            ],
+            &[("net", 4)],
+            &[],
+        );
+        let (paths, prefixes) = colliding_paths(&listing);
+        assert!(paths.contains(b"net/xt_MARK.c".as_slice()));
+        assert!(paths.contains(b"net/xt_mark.c".as_slice()));
+        assert!(!paths.contains(b"net/other.c".as_slice()));
+        assert!(prefixes.is_empty());
+    }
+
+    #[test]
+    fn directories_that_differ_only_by_case_take_their_subtrees_with_them() {
+        let listing = listing(
+            &[("Net/a.c", 1), ("net/b.c", 2)],
+            &[("Net", 3), ("net", 4)],
+            &[],
+        );
+        let (paths, prefixes) = colliding_paths(&listing);
+        assert!(paths.contains(b"Net".as_slice()));
+        assert_eq!(prefixes, vec![b"Net/".to_vec(), b"net/".to_vec()]);
+    }
+
+    #[test]
+    fn a_tree_and_a_blob_that_fold_together_both_go_to_git() {
+        let listing = listing(&[("Doc", 1), ("doc/a.c", 2)], &[("doc", 3)], &[]);
+        let (paths, prefixes) = colliding_paths(&listing);
+        assert!(paths.contains(b"Doc".as_slice()));
+        assert!(paths.contains(b"doc".as_slice()));
+        assert_eq!(prefixes, vec![b"doc/".to_vec()]);
     }
 
     #[test]
