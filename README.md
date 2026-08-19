@@ -161,6 +161,10 @@ def --wrapped git [...args] {
 }
 ```
 
+The bash, zsh, fish and nushell blocks were executed against a real git before release.
+The PowerShell one was reviewed line by line but has not been run on any machine yet, so
+treat it as unverified and [say so if it misbehaves](https://github.com/alltuner/git-sprout/issues).
+
 **2. A `git` shim on `PATH`**, for everything else. Editors, worktree managers, CI jobs and
 agent harnesses spawn `git` themselves, so a shell function never sees them. The shim is a
 small `git` wrapper in its own directory that you put ahead of the real git on `PATH`; it

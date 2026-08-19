@@ -527,6 +527,10 @@ end</code></pre>
 }</code></pre>
       </div>
 
+      <!-- TODO(M4): drop this caveat once the PowerShell block has been run on a real
+           machine. Every other block on this page was executed before publishing. -->
+      <p class="note" style="margin-top:1.25rem">The bash, zsh, fish and nushell blocks were executed against a real git before this page went up. The PowerShell one was reviewed line by line but has not been run on any machine yet, so treat it as unverified and <a href="https://github.com/alltuner/git-sprout/issues">say so if it misbehaves</a>.</p>
+
       <p class="note" style="margin-top:1.25rem">Each one matches only <code>worktree add</code> as the first two words. <code>git -C dir worktree add</code>, and anything else a script or an editor runs, goes to git untouched. That is what the shim below is for.</p>
 
       <!-- TODO(M5): confirm the exact wrapper path and profile line against the shipped
