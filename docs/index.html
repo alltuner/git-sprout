@@ -101,7 +101,7 @@ svg{display:block;max-width:100%}
 /* Status strip — remove at M4, see the note in the Compatibility section. */
 .status{background:var(--bg-elevated);border-bottom:1px solid var(--fg-faint);font-size:.8rem;color:var(--fg-dim)}
 .status .container{padding-top:.6rem;padding-bottom:.6rem}
-.status b{font-family:var(--font-mono);font-weight:400;color:var(--accent)}
+.status b{font-family:var(--font-mono);font-weight:400;color:var(--fg)}
 
 /* Buttons */
 .btn{display:inline-flex;align-items:center;justify-content:center;gap:.5rem;padding:.7rem 1.15rem;min-height:44px;border-radius:var(--radius-md);font-family:var(--font-mono);font-size:.85rem;border:1px solid transparent;background:none;cursor:pointer;transition:background 150ms var(--ease),color 150ms var(--ease),border-color 150ms var(--ease)}
@@ -185,7 +185,7 @@ tr.is-headline th,tr.is-headline td{font-weight:700;color:var(--fg)}
 /* Footer */
 .site-footer{padding:2.5rem 0 3rem;border-top:1px solid var(--fg-faint);font-size:.85rem;color:var(--fg-muted)}
 .site-footer__row{display:flex;flex-direction:column;align-items:center;gap:1.25rem;text-align:center}
-.site-footer__sub{font-size:.75rem;opacity:.75;margin-top:.25rem}
+.site-footer__sub{font-size:.75rem;margin-top:.25rem}
 .site-footer__links{display:flex;flex-wrap:wrap;justify-content:center;gap:1rem}
 .site-footer__links a{font-family:var(--font-mono);font-size:.75rem;color:var(--fg-muted)}
 .site-footer__links a:hover{color:var(--fg)}
@@ -252,6 +252,8 @@ tr.is-headline th,tr.is-headline td{font-weight:700;color:var(--fg)}
     <b>Under construction.</b> The compatibility contract below is what git-sprout is being built to, not yet a measured result. Every figure on this page is provisional.
   </div>
 </div>
+
+<main>
 
 <section class="hero">
   <div class="hero__glow"></div>
@@ -522,7 +524,7 @@ end</code></pre>
       <!-- TODO(M5): confirm the exact wrapper path and profile line against the shipped
            `git sprout install-shim` before this section goes live. -->
       <h3 style="margin-top:3rem;font-size:1.05rem">2. A <code>git</code> shim on <code>PATH</code>, for everything else</h3>
-      <p class="note">Editors, worktree managers, CI jobs and agent harnesses spawn <code>git</code> themselves, so a shell function never sees them. The shim is a small <code>git</code> wrapper in its own directory that you put ahead of the real git on <code>PATH</code>; it rewrites <code>worktree add</code> and <code>exec</code>s the real git for every other command.</p>
+      <p class="note">Editors, worktree managers, CI jobs and agent harnesses spawn <code>git</code> themselves, so a shell function never sees them. The shim is a small <code>git</code> wrapper in its own directory that you put ahead of the real git on <code>PATH</code>; it rewrites <code>worktree add</code> and passes every other command straight through to the real git.</p>
 
       <div class="block">
 <pre><code>git sprout install-shim      # prints the directory it wrote and the PATH line to add
@@ -539,6 +541,8 @@ git sprout uninstall-shim    # removes it</code></pre>
 <div class="divider"></div>
 
 <p class="budget">This page is <!--budget:site.size-->35 KB<!--/budget--> and <!--budget:site.requests-->3<!--/budget--> requests. So is your fifth worktree.</p>
+
+</main>
 
 <footer class="site-footer">
   <div class="container site-footer__row">

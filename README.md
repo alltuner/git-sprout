@@ -163,7 +163,7 @@ def --wrapped git [...args] {
 **2. A `git` shim on `PATH`**, for everything else. Editors, worktree managers, CI jobs and
 agent harnesses spawn `git` themselves, so a shell function never sees them. The shim is a
 small `git` wrapper in its own directory that you put ahead of the real git on `PATH`; it
-rewrites `worktree add` and `exec`s the real git for every other command.
+rewrites `worktree add` and passes every other command straight through to the real git.
 
 ```bash
 git sprout install-shim      # prints the directory it wrote and the PATH line to add
