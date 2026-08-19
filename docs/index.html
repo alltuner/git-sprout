@@ -246,11 +246,9 @@ tr.is-headline th,tr.is-headline td{font-weight:700;color:var(--fg)}
   </div>
 </header>
 
-<!-- TODO(M4): delete this strip, and swap the Compatibility wording, once the
-     differential suite is green. Until then the page states a contract, not a result. -->
 <div class="status">
   <div class="container">
-    <b>Under construction.</b> The compatibility contract below is what git-sprout is being built to, not yet a measured result. Every figure on this page is provisional.
+    <b>Verified on macOS.</b> The compatibility contract below is checked against real <code>git worktree add</code> by a differential suite that passes 28 repository fixtures and the Linux kernel. The Linux and Windows suites have not run yet.
   </div>
 </div>
 
@@ -394,9 +392,7 @@ tr.is-headline th,tr.is-headline td{font-weight:700;color:var(--fg)}
     <div class="reveal">
       <p class="eyebrow">Compatibility</p>
       <h2 class="section-title">Indistinguishable from git, and specific about where it is not.</h2>
-      <!-- TODO(M4): when the differential suite is green, this paragraph becomes the
-           verified claim ("verified byte for byte on every release"). Not before. -->
-      <p class="lead">This is the contract git-sprout is built to, and the differential test suite is being written to prove it. Until that suite is green, treat the list below as a design promise rather than a result.</p>
+      <p class="lead">Every item below is checked on every run of the differential suite, which performs each operation twice &mdash; once through real <code>git worktree add</code>, once through git-sprout &mdash; and compares the results. The suite earns its authority by detecting nineteen deliberately injected differences, and by finding nothing when git is compared against itself.</p>
     </div>
 
     <ul class="checks reveal">

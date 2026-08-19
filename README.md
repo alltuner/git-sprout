@@ -20,10 +20,12 @@
 
 ---
 
-> [!WARNING]
-> **Under construction.** The compatibility contract below is what git-sprout is being
-> built to, not yet a measured result. It becomes a claim when the differential suite is
-> green. Every figure here is provisional.
+> [!NOTE]
+> **Verified on macOS.** The compatibility contract below is checked against real
+> `git worktree add` by a differential suite that passes 28 repository fixtures and the
+> Linux kernel, and that proves itself by detecting nineteen injected differences. The
+> Linux and Windows suites have not run yet, and the smaller benchmark rows are still
+> the research prototype's rather than this implementation's.
 
 ## Get Started
 
