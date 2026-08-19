@@ -21,5 +21,13 @@ name = "git-worktree-fast"
 path = "src/bin/git-worktree-fast.rs"
 
 [dependencies]
+filetime = "0.2.29"
+gix-hash = { version = "0.26.0", features = ["sha1", "sha256"] }
+gix-index = "0.54.0"
+reflink-copy = "0.1.30"
+serde_json = { version = "1", default-features = false, features = ["std"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 
 [dev-dependencies]
