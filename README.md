@@ -63,7 +63,7 @@ and the cost scales with file count rather than with bytes.
 | btrfs, 188 MB | <!--bench:btrfs.time.git-->0.33s<!--/bench--> · <!--bench:btrfs.disk.git-->187 MB<!--/bench--> | <!--bench:btrfs.time.sprout-->0.05s<!--/bench--> · <!--bench:btrfs.disk.sprout-->0.1 MB<!--/bench--> |
 | ext4 (no block cloning) | <!--bench:ext4.time.git-->0.41s<!--/bench--> · <!--bench:ext4.disk.git-->187 MB<!--/bench--> | falls back, identical |
 
-One worktree of the Linux kernel, with an identical resulting tree oid:
+One worktree of the Linux kernel:
 <!--bench:kernel.disk.ratio-->42x<!--/bench--> less disk and about half the wall clock.
 That is <!--bench:kernel.disk.saved-->1.76 GB<!--/bench--> that never gets allocated every
 time anyone creates one. Ten engineers with five worktrees each is
@@ -95,7 +95,8 @@ observable way except time and disk. That is the contract, and the differential 
 - Same files, same modes, same index, compared byte for byte against real
   `git worktree add` across a matrix that includes `eol` conversion, `ident`, custom
   filters, LFS, submodules, sparse checkout, split index, SHA-256 repositories and
-  case-insensitive filesystems.
+  case-insensitive filesystems, where the correct answer is the same set of
+  already-modified paths git itself leaves behind rather than a clean worktree.
 - Untracked and ignored files are not copied, exactly as git does not copy them.
 - **Your repository's configuration is never modified.**
 - On a filesystem without block cloning it simply runs `git worktree add`.

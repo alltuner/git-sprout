@@ -280,7 +280,7 @@ tr.is-headline th,tr.is-headline td{font-weight:700;color:var(--fg)}
         <span class="stat__label">git sprout add</span>
       </span>
     </div>
-    <p class="stat__caption">Disk consumed by one worktree of the Linux kernel: <!--bench:kernel.files-->95 056<!--/bench--> files, <!--bench:kernel.bytes-->2.0 GB<!--/bench-->. Same resulting tree, byte for byte.</p>
+    <p class="stat__caption">Disk consumed by one worktree of the Linux kernel: <!--bench:kernel.files-->95 056<!--/bench--> files, <!--bench:kernel.bytes-->2.0 GB<!--/bench-->.</p>
   </div>
 </section>
 
@@ -291,7 +291,7 @@ tr.is-headline th,tr.is-headline td{font-weight:700;color:var(--fg)}
     <div class="reveal">
       <p class="eyebrow">The numbers</p>
       <h2 class="section-title">Measured, not asserted.</h2>
-      <p class="lead">One worktree, one repository everyone knows. Both runs produce an identical tree oid; the only difference is what the filesystem had to allocate.</p>
+      <p class="lead">One worktree, one repository everyone knows. What changes between the two runs is what the filesystem had to allocate.</p>
     </div>
 
     <figure class="bars reveal">
@@ -394,7 +394,7 @@ tr.is-headline th,tr.is-headline td{font-weight:700;color:var(--fg)}
     <ul class="checks reveal">
       <li>Same flags, same output on stdout and stderr, same exit codes.</li>
       <li>Same hooks, in the same order, with the same arguments.</li>
-      <li>Same files, same modes, same index, compared byte for byte against real <code>git worktree add</code> across a matrix that includes <code>eol</code> conversion, <code>ident</code>, custom filters, LFS, submodules, sparse checkout, split index, SHA-256 repositories and case-insensitive filesystems.</li>
+      <li>Same files, same modes, same index, compared byte for byte against real <code>git worktree add</code> across a matrix that includes <code>eol</code> conversion, <code>ident</code>, custom filters, LFS, submodules, sparse checkout, split index, SHA-256 repositories and case-insensitive filesystems, where the correct answer is the same set of already-modified paths git itself leaves behind rather than a clean worktree.</li>
       <li>Untracked and ignored files are not copied, exactly as git does not copy them.</li>
       <li><strong>Your repository's configuration is never modified.</strong></li>
       <li>On a filesystem without block cloning it simply runs <code>git worktree add</code>.</li>
