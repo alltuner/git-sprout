@@ -166,7 +166,8 @@ measure_sides() { # scenario-id
       dirty="$(git -C "$dest" status --porcelain | wc -l | tr -d ' ')"
       record kind=sample scenario="$sc" side="$side" run:="$run" \
         time_s:="$MEASURE_TIME_S" disk_mb:="$MEASURE_DISK_MB" \
-        first_status_s:="$status_s" tree_oid="$tree_oid" dirty_paths:="$dirty"
+        first_status_s:="$status_s" tree_oid="$tree_oid" dirty_paths:="$dirty" \
+        settled:="$MEASURE_SETTLED" load_avg:="$(load_avg)"
       drop_worktree "$SC_REPO" "$dest" "$branch"
     done
   done

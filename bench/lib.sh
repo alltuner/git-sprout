@@ -10,21 +10,40 @@ note() { printf '  %s\n' "$*" >&2; }
 
 avail_kb() { df -k "$1" | awk 'NR==2 {print $4}'; }
 
-# Free space is sampled until two consecutive readings agree within 2 MB, because
-# APFS keeps accounting for a while after a large write.
+# Prints "<free kb> <settled>", where settled is 0 when free space never stopped
+# moving within the timeout and the resulting figure cannot be trusted.
+# Free space is sampled until three consecutive readings agree within 1 MB, because
+# APFS reclaims lazily after a large delete and a single agreeing pair can land in the
+# middle of a slow trickle -- which shows up as a worktree that consumed no disk, or
+# negative disk.
+SETTLE_TIMEOUT_S="${SETTLE_TIMEOUT_S:-20}"
 settle_kb() {
-  local path="$1" prev cur i
+  local path="$1" prev cur stable i
   sync
   prev=$(avail_kb "$path")
-  for i in 1 2 3 4 5 6 7 8 9 10 11 12; do
-    sleep 0.5
+  stable=0
+  for i in $(seq 1 $(( SETTLE_TIMEOUT_S * 5 / 2 )) ); do
+    sleep 0.4
     cur=$(avail_kb "$path")
-    if [ $(( prev > cur ? prev - cur : cur - prev )) -lt 2048 ]; then
-      echo "$cur"; return
+    if [ $(( prev > cur ? prev - cur : cur - prev )) -lt 1024 ]; then
+      stable=$(( stable + 1 ))
+      if [ "$stable" -ge 3 ]; then echo "$cur 1"; return; fi
+    else
+      stable=0
     fi
     prev=$cur
   done
-  echo "$cur"
+  echo "$cur 0"
+}
+
+# One-minute load average, recorded with every sample: a busy volume is the one thing
+# that can make a free-space delta lie, and the reader deserves to see it.
+load_avg() {
+  case "$(uname -s)" in
+    Darwin) sysctl -n vm.loadavg | awk '{print $2}' ;;
+    Linux) awk '{print $1}' /proc/loadavg ;;
+    *) echo 0 ;;
+  esac
 }
 
 fs_type() {
@@ -53,13 +72,18 @@ print(f"{elapsed:.4f}")
 ' "$@"
 }
 
-# measure <volume> <cwd> <cmd...> -> sets MEASURE_TIME_S and MEASURE_DISK_MB
+# measure <volume> <cwd> <cmd...> -> sets MEASURE_TIME_S, MEASURE_DISK_MB and
+# MEASURE_SETTLED, which is false when free space never stopped moving and the disk
+# figure is therefore not trustworthy.
 measure() {
   local vol="$1"; shift
-  local before after
-  before=$(settle_kb "$vol")
+  local before after sampled
+  MEASURE_SETTLED=true
+  sampled=$(settle_kb "$vol"); before=${sampled% *}
+  [ "${sampled#* }" = 1 ] || MEASURE_SETTLED=false
   MEASURE_TIME_S=$(time_cmd "$@") || return 1
-  after=$(settle_kb "$vol")
+  sampled=$(settle_kb "$vol"); after=${sampled% *}
+  [ "${sampled#* }" = 1 ] || MEASURE_SETTLED=false
   MEASURE_DISK_MB=$(python3 -c "print(f'{($before - $after) / 1024:.2f}')")
 }
 

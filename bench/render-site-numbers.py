@@ -67,6 +67,8 @@ REGION_RE = re.compile(r"<!--bench:region-->(.*?)<!--/bench:region-->", re.S)
 TAG_WITH_ATTR_RE = re.compile(r"<[^<>]*\bdata-bench-[^<>]*>", re.S)
 ATTR_RE = re.compile(r'data-bench-([A-Za-z][A-Za-z0-9\-]*)="([A-Za-z0-9_.\-]+)"')
 COMMENT_RE = re.compile(r"<!--.*?-->", re.S)
+TAG_RE = re.compile(r"<[^<>]*>", re.S)
+SHAPE_RE = re.compile(r"<(?:rect|circle|line|polygon|polyline|path)\b[^<>]*>", re.I)
 DIGITS_RE = re.compile(r"\d")
 
 
@@ -175,7 +177,7 @@ def build_keys(report: dict[str, Any]) -> dict[str, str]:
             if fixture
             else title
         )
-        keys[f"{name}.machine"] = machine_line(machine)
+        keys[f"{name}.machine"] = machine_line(machine) if ok else NOT_MEASURED
         keys[f"{name}.files"] = fmt_count(fixture.get("tracked_files"))
         keys[f"{name}.size"] = fmt_size(fixture.get("logical_bytes"))
         keys[f"{name}.status"] = (scenario or {}).get("status", "missing")
@@ -190,7 +192,7 @@ def build_keys(report: dict[str, Any]) -> dict[str, str]:
 
         for side in SIDES:
             data = sides.get(side, {})
-            blank = baseline_only and side == "sprout"
+            blank = baseline_only and side == "sprout" and ok
             time_s = data.get("time_s", {}).get("median") if ok else None
             disk_mb = data.get("disk_mb", {}).get("median") if ok else None
             status_s = data.get("first_status_s", {}).get("median") if ok else None
@@ -281,12 +283,18 @@ def rewrite(text: str, keys: dict[str, str]) -> tuple[str, set[str], list[str]]:
 
 
 def unmarked_numbers(text: str) -> list[str]:
-    """Digits inside a bench region that no marker produced — the silent-drift failure."""
+    """Digits inside a bench region that no marker produced — the silent-drift failure.
+
+    Visible text and chart geometry are both figures a reader can read, so both are
+    checked. A shape whose digits really are static opts out with `data-bench-ignore`.
+    """
     offenders: list[str] = []
     for region in REGION_RE.findall(text):
-        stripped = TAG_WITH_ATTR_RE.sub(" ", SPAN_RE.sub(" ", region))
-        stripped = COMMENT_RE.sub(" ", stripped)
-        for line in stripped.splitlines():
+        for shape in SHAPE_RE.findall(region):
+            if "data-bench-" not in shape and DIGITS_RE.search(shape):
+                offenders.append(shape.strip())
+        stripped = COMMENT_RE.sub(" ", SPAN_RE.sub(" ", region))
+        for line in TAG_RE.sub(" ", stripped).splitlines():
             if DIGITS_RE.search(line):
                 offenders.append(line.strip())
     return offenders

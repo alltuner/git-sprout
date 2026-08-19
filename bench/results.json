@@ -1,0 +1,711 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-08-19T12:19:59+00:00",
+  "provisional": true,
+  "baseline_only": true,
+  "differential_verified": false,
+  "runs_per_side": 5,
+  "units": {
+    "time_s": "seconds of wall clock",
+    "disk_mb": "mebibytes of real disk consumed, measured as a free-space delta on the volume holding the worktree; logical size is deliberately not used",
+    "first_status_s": "seconds for the first `git status --porcelain` in the new worktree",
+    "load_avg": "one-minute load average at the end of the run; a busy machine is the one thing that makes the disk figure unreliable",
+    "unsettled_runs": "runs whose free-space sampling never stopped moving, so their disk_mb figure should not be trusted",
+    "logical_bytes": "bytes of working-tree content, excluding .git"
+  },
+  "tool": {
+    "name": "git-sprout",
+    "path": null,
+    "version": null
+  },
+  "machine": {
+    "cpu": "Apple M2",
+    "cores": 8,
+    "os": "macOS 26.6.1",
+    "kernel": "Darwin 25.6.0",
+    "arch": "arm64",
+    "git_version": "git version 2.55.0",
+    "filesystem": "apfs",
+    "scratch_path": "/Users/dpoblador/.cache/git-sprout-bench"
+  },
+  "scenarios": [
+    {
+      "id": "kernel",
+      "provisional": true,
+      "title": "Linux kernel shallow clone",
+      "status": "ok",
+      "skip_reason": null,
+      "machine": {
+        "cpu": "Apple M2",
+        "cores": 8,
+        "os": "macOS 26.6.1",
+        "kernel": "Darwin 25.6.0",
+        "arch": "arm64",
+        "git_version": "git version 2.55.0",
+        "filesystem": "apfs",
+        "scratch_path": "/Users/dpoblador/.cache/git-sprout-bench"
+      },
+      "fixture": {
+        "tracked_files": 95056,
+        "logical_bytes": 1617607577,
+        "source_commit": "bd5f485f3f026225b86573e559af0b7254ef4184",
+        "target_commitish": "HEAD",
+        "filesystem": "apfs"
+      },
+      "sides": {
+        "git": {
+          "tool": "git worktree add",
+          "command": [
+            "git",
+            "worktree",
+            "add",
+            "-b",
+            "bench-kernel-git-1",
+            "/Users/dpoblador/.cache/git-sprout-bench/wt-kernel-git-1"
+          ],
+          "cwd": "/Users/dpoblador/.cache/git-sprout-bench/linux",
+          "runs": 5,
+          "time_s": {
+            "median": 11.1302,
+            "min": 10.402,
+            "max": 16.9891,
+            "samples": [
+              11.1302,
+              10.402,
+              10.7584,
+              13.2325,
+              16.9891
+            ]
+          },
+          "disk_mb": {
+            "median": 1814.1,
+            "min": 1812.65,
+            "max": 1825.15,
+            "samples": [
+              1816.11,
+              1814.1,
+              1814.08,
+              1812.65,
+              1825.15
+            ]
+          },
+          "first_status_s": {
+            "median": 0.6275,
+            "min": 0.3981,
+            "max": 0.6838,
+            "samples": [
+              0.3981,
+              0.6275,
+              0.6279,
+              0.4127,
+              0.6838
+            ]
+          },
+          "tree_oid": "92b9cabbbefe9b8cee634769676b9b97238cdfc7",
+          "dirty_paths": 13,
+          "unsettled_runs": 0,
+          "load_avg": {
+            "median": 7.41,
+            "min": 6.69,
+            "max": 8.03,
+            "samples": [
+              7.57,
+              6.87,
+              8.03,
+              7.41,
+              6.69
+            ]
+          }
+        },
+        "sprout": {
+          "tool": "git worktree add",
+          "command": [
+            "git",
+            "worktree",
+            "add",
+            "-b",
+            "bench-kernel-sprout-1",
+            "/Users/dpoblador/.cache/git-sprout-bench/wt-kernel-sprout-1"
+          ],
+          "cwd": "/Users/dpoblador/.cache/git-sprout-bench/linux",
+          "runs": 5,
+          "time_s": {
+            "median": 12.7946,
+            "min": 11.7466,
+            "max": 13.5702,
+            "samples": [
+              12.7946,
+              13.5702,
+              11.7466,
+              13.1341,
+              12.7519
+            ]
+          },
+          "disk_mb": {
+            "median": 1813.92,
+            "min": 1809.42,
+            "max": 1872.2,
+            "samples": [
+              1813.92,
+              1809.42,
+              1817.57,
+              1813.07,
+              1872.2
+            ]
+          },
+          "first_status_s": {
+            "median": 0.3509,
+            "min": 0.2864,
+            "max": 0.4913,
+            "samples": [
+              0.2864,
+              0.4913,
+              0.33,
+              0.4467,
+              0.3509
+            ]
+          },
+          "tree_oid": "92b9cabbbefe9b8cee634769676b9b97238cdfc7",
+          "dirty_paths": 13,
+          "unsettled_runs": 0,
+          "load_avg": {
+            "median": 6.85,
+            "min": 6.24,
+            "max": 7.58,
+            "samples": [
+              7.58,
+              7.56,
+              6.85,
+              6.7,
+              6.24
+            ]
+          }
+        }
+      },
+      "comparison": {
+        "time_ratio": 0.87,
+        "disk_ratio": 1.0,
+        "tree_oid_match": true,
+        "dirty_paths_match": true
+      }
+    },
+    {
+      "id": "same-commit",
+      "provisional": true,
+      "title": "Worktree at the same commit",
+      "status": "ok",
+      "skip_reason": null,
+      "machine": {
+        "cpu": "Apple M2",
+        "cores": 8,
+        "os": "macOS 26.6.1",
+        "kernel": "Darwin 25.6.0",
+        "arch": "arm64",
+        "git_version": "git version 2.55.0",
+        "filesystem": "apfs",
+        "scratch_path": "/Users/dpoblador/.cache/git-sprout-bench"
+      },
+      "fixture": {
+        "tracked_files": 2000,
+        "logical_bytes": 262144000,
+        "source_commit": "d32e0c4d8b7c283199686cde954d8de9f8f15dd2",
+        "target_commitish": "HEAD",
+        "filesystem": "apfs"
+      },
+      "sides": {
+        "git": {
+          "tool": "git worktree add",
+          "command": [
+            "git",
+            "worktree",
+            "add",
+            "-b",
+            "bench-same-commit-git-1",
+            "/Users/dpoblador/.cache/git-sprout-bench/scratch/same-commit/wt-same-commit-git-1"
+          ],
+          "cwd": "/Users/dpoblador/.cache/git-sprout-bench/scratch/same-commit/repo",
+          "runs": 5,
+          "time_s": {
+            "median": 0.4268,
+            "min": 0.3489,
+            "max": 1.1299,
+            "samples": [
+              1.1299,
+              0.4268,
+              0.5032,
+              0.3728,
+              0.3489
+            ]
+          },
+          "disk_mb": {
+            "median": 252.73,
+            "min": 251.1,
+            "max": 253.83,
+            "samples": [
+              252.1,
+              251.1,
+              253.31,
+              253.83,
+              252.73
+            ]
+          },
+          "first_status_s": {
+            "median": 0.6515,
+            "min": 0.0794,
+            "max": 0.8169,
+            "samples": [
+              0.396,
+              0.6734,
+              0.8169,
+              0.0794,
+              0.6515
+            ]
+          },
+          "tree_oid": "d3b11a15dcf2b9499d7305c9665ca7c7bc974cbb",
+          "dirty_paths": 0,
+          "unsettled_runs": 0,
+          "load_avg": {
+            "median": 7.18,
+            "min": 6.54,
+            "max": 8.41,
+            "samples": [
+              8.41,
+              7.55,
+              7.18,
+              6.76,
+              6.54
+            ]
+          }
+        },
+        "sprout": {
+          "tool": "git worktree add",
+          "command": [
+            "git",
+            "worktree",
+            "add",
+            "-b",
+            "bench-same-commit-sprout-1",
+            "/Users/dpoblador/.cache/git-sprout-bench/scratch/same-commit/wt-same-commit-sprout-1"
+          ],
+          "cwd": "/Users/dpoblador/.cache/git-sprout-bench/scratch/same-commit/repo",
+          "runs": 5,
+          "time_s": {
+            "median": 0.3299,
+            "min": 0.3105,
+            "max": 0.6508,
+            "samples": [
+              0.4804,
+              0.3204,
+              0.3105,
+              0.6508,
+              0.3299
+            ]
+          },
+          "disk_mb": {
+            "median": 251.17,
+            "min": 247.73,
+            "max": 252.74,
+            "samples": [
+              252.74,
+              247.73,
+              251.17,
+              251.34,
+              250.57
+            ]
+          },
+          "first_status_s": {
+            "median": 0.6735,
+            "min": 0.6576,
+            "max": 1.1661,
+            "samples": [
+              0.6576,
+              0.6735,
+              0.6812,
+              1.1661,
+              0.6616
+            ]
+          },
+          "tree_oid": "d3b11a15dcf2b9499d7305c9665ca7c7bc974cbb",
+          "dirty_paths": 0,
+          "unsettled_runs": 0,
+          "load_avg": {
+            "median": 6.41,
+            "min": 6.27,
+            "max": 7.74,
+            "samples": [
+              6.41,
+              6.38,
+              6.27,
+              7.74,
+              7.15
+            ]
+          }
+        }
+      },
+      "comparison": {
+        "time_ratio": 1.294,
+        "disk_ratio": 1.006,
+        "tree_oid_match": true,
+        "dirty_paths_match": true
+      }
+    },
+    {
+      "id": "cross-commit",
+      "provisional": true,
+      "title": "Source checkout six paths behind the target",
+      "status": "ok",
+      "skip_reason": null,
+      "machine": {
+        "cpu": "Apple M2",
+        "cores": 8,
+        "os": "macOS 26.6.1",
+        "kernel": "Darwin 25.6.0",
+        "arch": "arm64",
+        "git_version": "git version 2.55.0",
+        "filesystem": "apfs",
+        "scratch_path": "/Users/dpoblador/.cache/git-sprout-bench"
+      },
+      "fixture": {
+        "tracked_files": 3000,
+        "logical_bytes": 196608000,
+        "source_commit": "7c5e200bea7ad60e5acec04cb0773f53efae6f7f",
+        "target_commitish": "feature",
+        "filesystem": "apfs"
+      },
+      "sides": {
+        "git": {
+          "tool": "git worktree add",
+          "command": [
+            "git",
+            "worktree",
+            "add",
+            "-b",
+            "bench-cross-commit-git-1",
+            "/Users/dpoblador/.cache/git-sprout-bench/scratch/cross-commit/wt-cross-commit-git-1",
+            "feature"
+          ],
+          "cwd": "/Users/dpoblador/.cache/git-sprout-bench/scratch/cross-commit/repo",
+          "runs": 5,
+          "time_s": {
+            "median": 0.5554,
+            "min": 0.3424,
+            "max": 1.0488,
+            "samples": [
+              0.7716,
+              1.0488,
+              0.5554,
+              0.4466,
+              0.3424
+            ]
+          },
+          "disk_mb": {
+            "median": 190.77,
+            "min": 187.62,
+            "max": 1460.52,
+            "samples": [
+              190.75,
+              187.62,
+              190.77,
+              191.01,
+              1460.52
+            ]
+          },
+          "first_status_s": {
+            "median": 0.4225,
+            "min": 0.1,
+            "max": 0.9182,
+            "samples": [
+              0.3225,
+              0.9182,
+              0.9175,
+              0.1,
+              0.4225
+            ]
+          },
+          "tree_oid": "878ba2f7ba901df68395367285796a2da6444142",
+          "dirty_paths": 0,
+          "unsettled_runs": 0,
+          "load_avg": {
+            "median": 9.16,
+            "min": 8.24,
+            "max": 10.19,
+            "samples": [
+              8.24,
+              10.19,
+              9.16,
+              8.59,
+              10.14
+            ]
+          }
+        },
+        "sprout": {
+          "tool": "git worktree add",
+          "command": [
+            "git",
+            "worktree",
+            "add",
+            "-b",
+            "bench-cross-commit-sprout-1",
+            "/Users/dpoblador/.cache/git-sprout-bench/scratch/cross-commit/wt-cross-commit-sprout-1",
+            "feature"
+          ],
+          "cwd": "/Users/dpoblador/.cache/git-sprout-bench/scratch/cross-commit/repo",
+          "runs": 5,
+          "time_s": {
+            "median": 0.3635,
+            "min": 0.3404,
+            "max": 0.3964,
+            "samples": [
+              0.3524,
+              0.3635,
+              0.3404,
+              0.394,
+              0.3964
+            ]
+          },
+          "disk_mb": {
+            "median": 189.27,
+            "min": 186.07,
+            "max": 190.37,
+            "samples": [
+              190.33,
+              189.27,
+              190.37,
+              189.0,
+              186.07
+            ]
+          },
+          "first_status_s": {
+            "median": 0.511,
+            "min": 0.2129,
+            "max": 0.5474,
+            "samples": [
+              0.5266,
+              0.511,
+              0.2605,
+              0.2129,
+              0.5474
+            ]
+          },
+          "tree_oid": "878ba2f7ba901df68395367285796a2da6444142",
+          "dirty_paths": 0,
+          "unsettled_runs": 0,
+          "load_avg": {
+            "median": 8.13,
+            "min": 7.51,
+            "max": 8.96,
+            "samples": [
+              8.96,
+              8.41,
+              8.13,
+              7.64,
+              7.51
+            ]
+          }
+        }
+      },
+      "comparison": {
+        "time_ratio": 1.528,
+        "disk_ratio": 1.008,
+        "tree_oid_match": true,
+        "dirty_paths_match": true
+      }
+    },
+    {
+      "id": "no-match",
+      "provisional": true,
+      "title": "No path shared with the source checkout",
+      "status": "ok",
+      "skip_reason": null,
+      "machine": {
+        "cpu": "Apple M2",
+        "cores": 8,
+        "os": "macOS 26.6.1",
+        "kernel": "Darwin 25.6.0",
+        "arch": "arm64",
+        "git_version": "git version 2.55.0",
+        "filesystem": "apfs",
+        "scratch_path": "/Users/dpoblador/.cache/git-sprout-bench"
+      },
+      "fixture": {
+        "tracked_files": 2000,
+        "logical_bytes": 262144000,
+        "source_commit": "64cfcb9903efce4b5545619fa7717790106b65ec",
+        "target_commitish": "rewritten",
+        "filesystem": "apfs"
+      },
+      "sides": {
+        "git": {
+          "tool": "git worktree add",
+          "command": [
+            "git",
+            "worktree",
+            "add",
+            "-b",
+            "bench-no-match-git-1",
+            "/Users/dpoblador/.cache/git-sprout-bench/scratch/no-match/wt-no-match-git-1",
+            "rewritten"
+          ],
+          "cwd": "/Users/dpoblador/.cache/git-sprout-bench/scratch/no-match/repo",
+          "runs": 5,
+          "time_s": {
+            "median": 0.3903,
+            "min": 0.3392,
+            "max": 1.1098,
+            "samples": [
+              0.5665,
+              0.3795,
+              0.3392,
+              1.1098,
+              0.3903
+            ]
+          },
+          "disk_mb": {
+            "median": 252.39,
+            "min": 250.26,
+            "max": 299.79,
+            "samples": [
+              250.26,
+              251.26,
+              252.39,
+              299.79,
+              253.2
+            ]
+          },
+          "first_status_s": {
+            "median": 0.4858,
+            "min": 0.2317,
+            "max": 0.8383,
+            "samples": [
+              0.4858,
+              0.2317,
+              0.6817,
+              0.2836,
+              0.8383
+            ]
+          },
+          "tree_oid": "b29d6f46eb74aab903640545bb41ed14262d6a1d",
+          "dirty_paths": 0,
+          "unsettled_runs": 0,
+          "load_avg": {
+            "median": 10.74,
+            "min": 9.41,
+            "max": 11.4,
+            "samples": [
+              10.89,
+              10.74,
+              11.4,
+              9.7,
+              9.41
+            ]
+          }
+        },
+        "sprout": {
+          "tool": "git worktree add",
+          "command": [
+            "git",
+            "worktree",
+            "add",
+            "-b",
+            "bench-no-match-sprout-1",
+            "/Users/dpoblador/.cache/git-sprout-bench/scratch/no-match/wt-no-match-sprout-1",
+            "rewritten"
+          ],
+          "cwd": "/Users/dpoblador/.cache/git-sprout-bench/scratch/no-match/repo",
+          "runs": 5,
+          "time_s": {
+            "median": 0.3955,
+            "min": 0.3376,
+            "max": 1.1808,
+            "samples": [
+              0.3389,
+              0.3955,
+              1.1808,
+              0.4059,
+              0.3376
+            ]
+          },
+          "disk_mb": {
+            "median": 251.51,
+            "min": 245.56,
+            "max": 261.93,
+            "samples": [
+              251.51,
+              261.93,
+              257.52,
+              245.56,
+              250.97
+            ]
+          },
+          "first_status_s": {
+            "median": 0.6491,
+            "min": 0.2268,
+            "max": 0.8634,
+            "samples": [
+              0.2268,
+              0.7091,
+              0.5809,
+              0.8634,
+              0.6491
+            ]
+          },
+          "tree_oid": "b29d6f46eb74aab903640545bb41ed14262d6a1d",
+          "dirty_paths": 0,
+          "unsettled_runs": 0,
+          "load_avg": {
+            "median": 8.41,
+            "min": 7.97,
+            "max": 9.05,
+            "samples": [
+              9.05,
+              8.49,
+              8.41,
+              8.06,
+              7.97
+            ]
+          }
+        }
+      },
+      "comparison": {
+        "time_ratio": 0.987,
+        "disk_ratio": 1.003,
+        "tree_oid_match": true,
+        "dirty_paths_match": true
+      }
+    },
+    {
+      "id": "btrfs",
+      "provisional": true,
+      "title": "btrfs",
+      "status": "skipped",
+      "skip_reason": "btrfs requires Linux; this run was on Darwin arm64",
+      "machine": {
+        "cpu": "Apple M2",
+        "cores": 8,
+        "os": "macOS 26.6.1",
+        "kernel": "Darwin 25.6.0",
+        "arch": "arm64",
+        "git_version": "git version 2.55.0",
+        "filesystem": "apfs",
+        "scratch_path": "/Users/dpoblador/.cache/git-sprout-bench"
+      }
+    },
+    {
+      "id": "ext4",
+      "provisional": true,
+      "title": "ext4",
+      "status": "skipped",
+      "skip_reason": "ext4 requires Linux; this run was on Darwin arm64",
+      "machine": {
+        "cpu": "Apple M2",
+        "cores": 8,
+        "os": "macOS 26.6.1",
+        "kernel": "Darwin 25.6.0",
+        "arch": "arm64",
+        "git_version": "git version 2.55.0",
+        "filesystem": "apfs",
+        "scratch_path": "/Users/dpoblador/.cache/git-sprout-bench"
+      }
+    }
+  ]
+}

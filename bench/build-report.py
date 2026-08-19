@@ -30,6 +30,10 @@ UNITS: dict[str, str] = {
     "disk_mb": "mebibytes of real disk consumed, measured as a free-space delta on the "
     "volume holding the worktree; logical size is deliberately not used",
     "first_status_s": "seconds for the first `git status --porcelain` in the new worktree",
+    "load_avg": "one-minute load average at the end of the run; a busy machine is the "
+    "one thing that makes the disk figure unreliable",
+    "unsettled_runs": "runs whose free-space sampling never stopped moving, so their "
+    "disk_mb figure should not be trusted",
     "logical_bytes": "bytes of working-tree content, excluding .git",
 }
 
@@ -66,6 +70,8 @@ def side_report(samples: list[dict[str, Any]], command: dict[str, Any] | None) -
         "first_status_s": spread([float(s["first_status_s"]) for s in samples]),
         "tree_oid": oids[0] if len(oids) == 1 else oids,
         "dirty_paths": int(samples[0]["dirty_paths"]),
+        "unsettled_runs": sum(1 for s in samples if not s.get("settled", True)),
+        "load_avg": spread([float(s.get("load_avg", 0)) for s in samples]),
     }
 
 

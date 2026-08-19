@@ -78,6 +78,36 @@ report is assembled from a macOS run and a Linux CI run:
 - Fixture content is random bytes, because a compressible fixture would understate
   what a real checkout allocates and flatter every disk figure on the page.
 
+### The disk figure needs a quiet volume
+
+A free-space delta measures the whole volume, so anything else writing or deleting
+gigabytes during a run lands in the number — a concurrent build or test suite can
+produce a worktree that apparently consumed nothing, or negative disk. The harness
+does not hide this:
+
+- `settle_kb` gives up after `SETTLE_TIMEOUT_S` (default 20) if free space never
+  stops moving, and the sample is recorded with `"settled": false`.
+- Every side carries `unsettled_runs`, and `load_avg` (median, min, max of the
+  one-minute load average at the end of each run).
+
+**Read those two fields before quoting any disk number.** A row with
+`unsettled_runs > 0`, or a load average that is not close to idle, was measured on a
+busy machine and the medians should be re-measured before they reach a page.
+
+## The Linux rows in CI
+
+`bench/ci-linux.sh` is the entry point for `btrfs` and `ext4`. It re-execs itself
+under `sudo`, installs `btrfs-progs` / `e2fsprogs` if they are missing, and writes its
+own report:
+
+```bash
+# in a privileged container
+docker run --rm --privileged -v "$PWD:/src" -w /src debian:stable-slim \
+  bash bench/ci-linux.sh
+# on a Linux CI runner
+sudo -E bench/ci-linux.sh --out bench/results/linux.json
+```
+
 ## Provenance and the `provisional` flag
 
 Every report carries `"provisional": true` — at the top level and on every scenario —
@@ -93,7 +123,10 @@ mistaken for the tool. The renderer refuses to put those figures in a tool colum
 writes `—` for every `*.sprout.*` key and says why in `meta.status`.
 
 `--promote` copies the report to `bench/results.json` and refuses to do it for a
-baseline-only run.
+baseline-only run, so the first promotion is the first real measurement of the tool.
+The `results.json` committed today is a baseline-only report placed by hand, so the
+site and the README have something to render against before the tool exists; it says
+so in `meta.status`, and every `*.sprout.*` figure on both pages reads `—`.
 
 ## JSON schema (`schema_version: 1`)
 
@@ -139,6 +172,8 @@ Sizes are binary: `MB` is 2²⁰ bytes, `GB` is 2³⁰.
           "time_s":         { "median": 11.58, "min": ..., "max": ..., "samples": [...] },
           "disk_mb":        { "median": 1805.0, "min": ..., "max": ..., "samples": [...] },
           "first_status_s": { "median": 0.35,  "min": ..., "max": ..., "samples": [...] },
+          "load_avg":       { "median": 0.9,   "min": ..., "max": ..., "samples": [...] },
+          "unsettled_runs": 0,                 // runs whose disk figure is untrustworthy
           "tree_oid": "92b9cabb...",           // a list, if the runs disagreed
           "dirty_paths": 13
         },
@@ -202,10 +237,25 @@ the bar widths come from the same JSON as the labels.
 <!--/bench:region-->
 ```
 
-Inside a region, **every digit must come from a marker**. The script strips out span
-markers, tags carrying `data-bench-*`, and comments, and then fails on any digit that
-is left. Put the numbers table, the hero figure and the chart inside a region; keep
-static geometry, CSS and prose that legitimately contains digits outside one.
+Inside a region, **every digit a reader can see must come from a marker**. Two checks
+run:
+
+- **Visible text.** Span markers, comments and all tags are stripped; any digit left
+  in the text is an error.
+- **Chart geometry.** A `rect`, `circle`, `line`, `polygon`, `polyline` or `path`
+  inside a region that carries digits must also carry a `data-bench-*` attribute — a
+  hard-coded bar width is a figure like any other.
+
+A shape whose digits really are static — an axis rule, a stroke width — opts out with
+a bare `data-bench-ignore` attribute:
+
+```html
+<line x1="0" y1="9" x2="100" y2="9" data-bench-ignore/>
+```
+
+Put the numbers table, the hero figure and the chart inside a region. Keep CSS, the
+`<svg viewBox>` and prose that legitimately contains digits (a git version, a shell
+snippet) outside one — the region is a claim that everything in it is a measurement.
 
 ### Key grammar
 
