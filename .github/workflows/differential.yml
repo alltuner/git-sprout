@@ -1,0 +1,183 @@
+name: Differential
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  MANIFEST: tests/differential/Cargo.toml
+
+jobs:
+  # The suite compares real `git worktree add` against real `git worktree add`, which
+  # is what proves it produces no false positives, and against the built binary,
+  # which is what proves the tool is a drop-in replacement.
+  matrix:
+    name: ${{ matrix.os }} / ${{ matrix.mode }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest, windows-latest]
+        mode: [self-test, tool]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target\ntests/differential -> tests/differential/target"
+
+      - name: Build the tool
+        if: matrix.mode == 'tool'
+        run: cargo build --release -p git-sprout
+
+      - name: Point the harness at the tool
+        if: matrix.mode == 'tool'
+        shell: bash
+        run: |
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            echo "SPROUT_BIN=$PWD/target/release/git-sprout.exe" >> "$GITHUB_ENV"
+          else
+            echo "SPROUT_BIN=$PWD/target/release/git-sprout" >> "$GITHUB_ENV"
+          fi
+
+      - name: Differential suite
+        run: cargo test --release --manifest-path $MANIFEST -- --nocapture
+        shell: bash
+
+  # Block cloning on Linux lives on btrfs and XFS with reflink=1; ext4 has none and
+  # must exercise the fallback. Loopback images give all three on one runner.
+  linux-filesystems:
+    name: linux / ${{ matrix.fs }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        fs: [btrfs, xfs, ext4]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "tests/differential -> tests/differential/target"
+
+      - name: Install filesystem tools
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq btrfs-progs xfsprogs e2fsprogs
+
+      - name: Create and mount a ${{ matrix.fs }} image
+        run: |
+          set -euo pipefail
+          sudo mkdir -p /mnt/fsimage
+          truncate -s 8G "$RUNNER_TEMP/${{ matrix.fs }}.img"
+          case "${{ matrix.fs }}" in
+            btrfs) sudo mkfs.btrfs -q -f "$RUNNER_TEMP/${{ matrix.fs }}.img" ;;
+            xfs)   sudo mkfs.xfs -q -m reflink=1 -f "$RUNNER_TEMP/${{ matrix.fs }}.img" ;;
+            ext4)  sudo mkfs.ext4 -q -F "$RUNNER_TEMP/${{ matrix.fs }}.img" ;;
+          esac
+          sudo mount -o loop "$RUNNER_TEMP/${{ matrix.fs }}.img" /mnt/fsimage
+          sudo chown "$(id -u):$(id -g)" /mnt/fsimage
+          df -hT /mnt/fsimage
+
+      - name: Build the tool
+        run: cargo build --release -p git-sprout
+
+      - name: Differential suite on ${{ matrix.fs }}
+        env:
+          SPROUT_TEST_TMPDIR: /mnt/fsimage/scratch
+        run: |
+          echo "SPROUT_BIN=$PWD/target/release/git-sprout" >> "$GITHUB_ENV"
+          SPROUT_BIN=$PWD/target/release/git-sprout \
+            cargo test --release --manifest-path $MANIFEST -- --nocapture
+
+  # NTFS has no block cloning and must fall back; ReFS has it. The runner has no ReFS
+  # volume by default, so the second job formats one.
+  windows-refs:
+    name: windows / ReFS
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "tests/differential -> tests/differential/target"
+
+      - name: Create and format a ReFS volume
+        shell: pwsh
+        run: |
+          $script = @"
+          create vdisk file=C:\refs.vhdx maximum=20480 type=expandable
+          attach vdisk
+          create partition primary
+          assign letter=R
+          "@
+          $script | Out-File -Encoding ascii diskpart.txt
+          diskpart /s diskpart.txt
+          Format-Volume -DriveLetter R -FileSystem ReFS -NewFileSystemLabel refs -Confirm:$false -Force
+          Get-Volume -DriveLetter R
+          New-Item -ItemType Directory -Path R:\scratch | Out-Null
+
+      - name: Build the tool
+        run: cargo build --release -p git-sprout
+
+      - name: Differential suite on ReFS
+        shell: bash
+        env:
+          SPROUT_TEST_TMPDIR: 'R:\scratch'
+        run: |
+          SPROUT_BIN="$PWD/target/release/git-sprout.exe" \
+            cargo test --release --manifest-path $MANIFEST -- --nocapture
+
+  # The most valuable fixture, on both kinds of volume: case-insensitive APFS, where
+  # git legitimately loses thirteen paths, and case-sensitive ext4, where it does not.
+  kernel:
+    name: kernel / ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "tests/differential -> tests/differential/target"
+
+      - name: Cache the kernel clone
+        uses: actions/cache@v4
+        with:
+          path: tests/fixtures/cache
+          key: kernel-shallow-v1-${{ matrix.os }}
+
+      - name: Fetch fixtures
+        run: ./tests/fixtures/fetch.sh
+
+      - name: Build the tool
+        run: cargo build --release -p git-sprout
+
+      - name: Kernel parity, self-test
+        run: cargo test --release --manifest-path $MANIFEST --test kernel -- --ignored --nocapture
+
+      - name: Kernel parity, against the tool
+        env:
+          SPROUT_BIN: ${{ github.workspace }}/target/release/git-sprout
+        run: cargo test --release --manifest-path $MANIFEST --test kernel -- --ignored --nocapture
+
+  lint:
+    name: fmt and clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "tests/differential -> tests/differential/target"
+      - run: cargo fmt --manifest-path $MANIFEST --all --check
+      - run: cargo clippy --manifest-path $MANIFEST --all-targets -- -D warnings
+      - name: Fixture builders parse
+        run: for f in tests/fixtures/*.sh tests/fixtures/build/*.sh; do sh -n "$f"; done
