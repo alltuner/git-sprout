@@ -25,6 +25,10 @@ SCENARIO_ORDER: list[str] = [
 
 SIDES: list[str] = ["git", "sprout"]
 
+# A side whose slowest run took more than this many times its fastest was not
+# measuring the tool, it was measuring whatever else the machine was doing.
+STABLE_SPREAD = 2.0
+
 UNITS: dict[str, str] = {
     "time_s": "seconds of wall clock",
     "disk_mb": "mebibytes of real disk consumed, measured as a free-space delta on the "
@@ -62,17 +66,19 @@ def side_report(
     samples: list[dict[str, Any]], command: dict[str, Any] | None
 ) -> dict[str, Any]:
     oids = sorted({s["tree_oid"] for s in samples})
+    times = spread([float(s["time_s"]) for s in samples])
     return {
         "tool": (command or {}).get("tool"),
         "command": (command or {}).get("argv"),
         "cwd": (command or {}).get("cwd"),
         "runs": len(samples),
-        "time_s": spread([float(s["time_s"]) for s in samples]),
+        "time_s": times,
         "disk_mb": spread([float(s["disk_mb"]) for s in samples]),
         "first_status_s": spread([float(s["first_status_s"]) for s in samples]),
         "tree_oid": oids[0] if len(oids) == 1 else oids,
         "dirty_paths": int(samples[0]["dirty_paths"]),
         "unsettled_runs": sum(1 for s in samples if not s.get("settled", True)),
+        "stable": times["max"] <= times["min"] * STABLE_SPREAD,
         "load_avg": spread([float(s.get("load_avg", 0)) for s in samples]),
     }
 
@@ -163,6 +169,30 @@ def merge_scenarios(
     return [by_id[name] for name in SCENARIO_ORDER if name in by_id]
 
 
+def quality(scenarios: list[dict[str, Any]]) -> dict[str, Any]:
+    """Whether these figures are fit to publish, stated by the harness rather than hoped.
+
+    A run on a busy volume produces a disk delta that measures the other work, and a
+    time spread that measures the queue. Either one makes a figure that would flatter
+    or slander the tool at random, so the report says so and `--promote` refuses it.
+    """
+    unsettled: list[str] = []
+    unstable: list[str] = []
+    for scenario in scenarios:
+        if scenario["status"] != "ok":
+            continue
+        for name, side in scenario.get("sides", {}).items():
+            if side["unsettled_runs"]:
+                unsettled.append(f"{scenario['id']}.{name}")
+            if not side["stable"]:
+                unstable.append(f"{scenario['id']}.{name}")
+    return {
+        "unsettled_sides": unsettled,
+        "unstable_sides": unstable,
+        "trustworthy": not unsettled and not unstable,
+    }
+
+
 def build(raw: Path, merges: list[Path]) -> dict[str, Any]:
     records = read_records(raw)
     meta = next(r for r in records if r["kind"] == "meta")
@@ -190,6 +220,7 @@ def build(raw: Path, merges: list[Path]) -> dict[str, Any]:
     scenarios = merge_scenarios(local, others)
 
     return {
+        "quality": quality(scenarios),
         "schema_version": meta["schema_version"],
         "generated_at": datetime.now(UTC).isoformat(timespec="seconds"),
         "provisional": provisional,
@@ -228,6 +259,13 @@ def main() -> int:
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(report, indent=2) + "\n")
 
+    if not report["quality"]["trustworthy"]:
+        print(
+            "bench: these figures were measured on a busy machine and are not fit to "
+            f"publish: unsettled {report['quality']['unsettled_sides']}, "
+            f"unstable {report['quality']['unstable_sides']}",
+            file=sys.stderr,
+        )
     if report["baseline_only"]:
         print(
             "bench: baseline-only run — both sides were `git worktree add`, "

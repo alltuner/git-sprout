@@ -367,6 +367,14 @@ note "wrote $OUT"
 
 if [ "$PROMOTE" = 1 ]; then
   [ "$BASELINE_ONLY" = 1 ] && die "--promote refuses a baseline-only run: both sides were git worktree add"
+  python3 -c "
+import json, sys
+report = json.load(open(sys.argv[1]))
+if not report['quality']['trustworthy']:
+    sys.exit('--promote refuses figures measured on a busy machine: '
+             f\"unsettled {report['quality']['unsettled_sides']}, \"
+             f\"unstable {report['quality']['unstable_sides']}\")
+" "$OUT" || die "re-measure on an idle machine before promoting"
   cp "$OUT" "$BENCH_DIR/results.json"
   note "promoted to $BENCH_DIR/results.json"
 fi

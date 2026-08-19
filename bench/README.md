@@ -87,12 +87,16 @@ does not hide this:
 
 - `settle_kb` gives up after `SETTLE_TIMEOUT_S` (default 20) if free space never
   stops moving, and the sample is recorded with `"settled": false`.
-- Every side carries `unsettled_runs`, and `load_avg` (median, min, max of the
-  one-minute load average at the end of each run).
+- Every side carries `unsettled_runs`, `stable` (its slowest run took no more than
+  twice its fastest), and `load_avg` (median, min, max of the one-minute load average
+  at the end of each run).
+- The report's top-level `quality` block names every unsettled and unstable side and
+  reduces them to one boolean, `trustworthy`.
 
-**Read those two fields before quoting any disk number.** A row with
-`unsettled_runs > 0`, or a load average that is not close to idle, was measured on a
-busy machine and the medians should be re-measured before they reach a page.
+**`--promote` refuses a report whose `quality.trustworthy` is false**, so figures
+measured next to a busy build cannot reach a page. This is not a formality: a
+contaminated run will flatter or slander the tool at random, and spec §9.1 is emphatic
+that the honest framing is the persuasive one.
 
 ## The Linux rows in CI
 
@@ -140,6 +144,11 @@ Sizes are binary: `MB` is 2²⁰ bytes, `GB` is 2³⁰.
   "baseline_only": true,           // both sides were `git worktree add`
   "differential_verified": false,  // the differential suite was green for this build
   "runs_per_side": 3,
+  "quality": {                     // is this report fit to publish?
+    "unsettled_sides": [],         // "kernel.git" — free space never stopped moving
+    "unstable_sides": [],          // "kernel.git" — slowest run over 2x the fastest
+    "trustworthy": true            // --promote refuses the report when this is false
+  },
   "units": { "time_s": "...", "disk_mb": "...", ... },   // prose, per metric suffix
   "tool":    { "name": "git-sprout", "path": "...", "version": "..." },
   "machine": {
@@ -174,6 +183,7 @@ Sizes are binary: `MB` is 2²⁰ bytes, `GB` is 2³⁰.
           "first_status_s": { "median": 0.35,  "min": ..., "max": ..., "samples": [...] },
           "load_avg":       { "median": 0.9,   "min": ..., "max": ..., "samples": [...] },
           "unsettled_runs": 0,                 // runs whose disk figure is untrustworthy
+          "stable": true,                      // slowest run within 2x of the fastest
           "tree_oid": "92b9cabb...",           // a list, if the runs disagreed
           "dirty_paths": 13
         },
