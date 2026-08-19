@@ -38,6 +38,13 @@ const TRACKED_FILES: usize = 95_056;
 const DESTINATION: &str = "kernel-differential-wt";
 const BRANCH: &str = "kernel-differential";
 
+/// The fixture repository is used exclusively for the duration of this test: the
+/// two sides run sequentially in it, so anything else creating a ref or a worktree
+/// in the same repository in between shows up as a difference that is real but not
+/// the implementation's. `just fixtures` puts a clone under `tests/fixtures/cache`
+/// for this purpose; point `SPROUT_KERNEL_REPO` at another one only if nothing else
+/// is using it.
+///
 /// Deliberately not asserted anywhere below: the worktree's tree oid. It is written
 /// from the index, not from the working tree, so it comes back identical to
 /// `HEAD^{tree}` even with thirteen files physically wrong on disk. It is a
