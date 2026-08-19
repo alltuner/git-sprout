@@ -294,14 +294,21 @@ tr.is-headline th,tr.is-headline td{font-weight:700;color:var(--fg)}
       <p class="lead">One worktree, one repository everyone knows. What changes between the two runs is what the filesystem had to allocate.</p>
     </div>
 
+    <!-- The bars are a figure like any other, so they carry bench markers too. Each
+         marked <rect> is replaced whole. The viewBox is fixed at 0 0 1000 24, so a
+         width is its metric scaled against the larger of the two: the bigger bar is
+         always 1000, the smaller is round(metric / larger * 1000, 2). Emit exactly:
+           chart.bar.git     <rect class="bar" x="0" y="0" width="1000" height="24"/>
+           chart.bar.sprout  <rect class="bar bar--sprout" x="0" y="0" width="23.8" height="24"/>
+         The classes carry the colour and the reveal transform. Keep them. -->
     <figure class="bars reveal">
       <div class="bars__row">
         <div class="bars__head"><span class="bars__name">git worktree add</span><span class="bars__figure"><!--bench:kernel.disk.git-->1805 MB<!--/bench--></span></div>
-        <svg class="bars__track" viewBox="0 0 1000 24" preserveAspectRatio="none" role="img" aria-label="git worktree add: 1805 megabytes"><!--bench:chart.bar.git--><rect class="bar" x="0" y="0" width="1000" height="24"/><!--/bench--></svg>
+        <svg class="bars__track" viewBox="0 0 1000 24" preserveAspectRatio="none" aria-hidden="true"><!--bench:chart.bar.git--><rect class="bar" x="0" y="0" width="1000" height="24"/><!--/bench--></svg>
       </div>
       <div class="bars__row">
         <div class="bars__head"><span class="bars__name">git sprout add</span><span class="bars__figure bars__figure--sprout"><!--bench:kernel.disk.sprout-->43 MB<!--/bench--></span></div>
-        <svg class="bars__track" viewBox="0 0 1000 24" preserveAspectRatio="none" role="img" aria-label="git sprout add: 43 megabytes"><!--bench:chart.bar.sprout--><rect class="bar bar--sprout" x="0" y="0" width="23.8" height="24"/><!--/bench--></svg>
+        <svg class="bars__track" viewBox="0 0 1000 24" preserveAspectRatio="none" aria-hidden="true"><!--bench:chart.bar.sprout--><rect class="bar bar--sprout" x="0" y="0" width="23.8" height="24"/><!--/bench--></svg>
       </div>
       <figcaption class="bars__scale">Same scale, same axis. <!--bench:kernel.disk.ratio-->42x<!--/bench--> less disk. That is <!--bench:kernel.disk.saved-->1.76 GB<!--/bench--> that never gets allocated, every time anyone creates a worktree.</figcaption>
     </figure>
