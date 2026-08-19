@@ -30,6 +30,8 @@ impl CloneBackend {
 pub struct Stats {
     /// Paths materialised by a block clone.
     pub cloned: usize,
+    /// Subtrees cloned in a single call rather than file by file.
+    pub cloned_directories: usize,
     /// Paths the plan considered and rejected, so git had to write them.
     pub skipped: usize,
     /// Paths in the target tree that git checked out itself. Zero when no plan ran.
@@ -46,6 +48,7 @@ impl Default for Stats {
     fn default() -> Self {
         Stats {
             cloned: 0,
+            cloned_directories: 0,
             skipped: 0,
             checked_out_by_git: 0,
             source: None,
@@ -66,6 +69,7 @@ impl Stats {
     fn to_json(&self) -> String {
         let value = serde_json::json!({
             "cloned": self.cloned,
+            "cloned_directories": self.cloned_directories,
             "skipped": self.skipped,
             "checked_out_by_git": self.checked_out_by_git,
             "source": self.source.as_ref().map(|path| path.to_string_lossy()),

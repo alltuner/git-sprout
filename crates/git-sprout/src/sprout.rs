@@ -295,6 +295,11 @@ fn populate(git: &Git, destination: &Path, before: &[source::Worktree], stats: &
     );
 
     let (records, demotion) = materialise(cloner.as_ref(), &source, destination, &plan);
+    stats.cloned_directories = if demotion.is_none() {
+        plan.directories.len()
+    } else {
+        0
+    };
     if let Some(reason) = demotion {
         stats.fall_back(reason);
     }
