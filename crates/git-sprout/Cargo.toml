@@ -21,5 +21,6 @@ name = "git-worktree-fast"
 path = "src/bin/git-worktree-fast.rs"
 
 [dependencies]
+serde_json = { version = "1", default-features = false, features = ["std"] }
 
 [dev-dependencies]
