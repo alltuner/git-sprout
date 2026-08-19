@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 /// Fixed identity and clock for every git invocation. Reflog and commit timestamps
 /// are derived from these, so both sides of a comparison produce identical bytes
@@ -44,6 +44,10 @@ pub struct Workspace {
     home: PathBuf,
     counter: AtomicU64,
     keep: bool,
+    /// Set when a case directory has been kept for inspection. The whole scratch
+    /// tree then survives the run, or the path named in a failure message would be
+    /// gone by the time anyone read it.
+    retained: AtomicBool,
 }
 
 impl Workspace {
@@ -74,6 +78,7 @@ impl Workspace {
             home,
             counter: AtomicU64::new(0),
             keep: std::env::var_os("SPROUT_TEST_KEEP").is_some(),
+            retained: AtomicBool::new(false),
         })
     }
 
@@ -91,12 +96,18 @@ impl Workspace {
         Ok(dir)
     }
 
-    /// Removes a case directory once its comparison passed. Failing cases are left
-    /// on disk for inspection, as is everything when `SPROUT_TEST_KEEP` is set.
+    /// Removes a case directory once its comparison passed. Everything survives when
+    /// `SPROUT_TEST_KEEP` is set.
     pub fn release_case(&self, dir: &Path) {
         if !self.keep {
             let _ = remove_tree(dir);
         }
+    }
+
+    /// Keeps the whole scratch tree past the end of the run, because something in it
+    /// is named in a failure message.
+    pub fn retain(&self) {
+        self.retained.store(true, Ordering::SeqCst);
     }
 
     /// The environment every git and tool invocation runs under.
@@ -150,7 +161,7 @@ impl Workspace {
 
 impl Drop for Workspace {
     fn drop(&mut self) {
-        if !self.keep {
+        if !self.keep && !self.retained.load(Ordering::SeqCst) {
             let _ = remove_tree(&self.root);
         }
     }

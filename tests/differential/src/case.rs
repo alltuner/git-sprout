@@ -164,7 +164,8 @@ impl Runner {
     }
 }
 
-/// Formats one diverged case for a failure report.
+/// Formats one diverged case for a failure report. The caller must have kept the
+/// case directory, since the report names it.
 pub fn report(fixture: &str, flags: &FlagCase, tool: &Tool, result: &CaseResult) -> String {
     let mut block = format!(
         "\n{fixture} / {} ({})\n  argv: add {}\n  left behind: {}\n",
@@ -210,6 +211,7 @@ pub fn check_fixture(fixture: &str, cases: &[&FlagCase]) {
                         if result.differences.is_empty() {
                             runner.release(&result.case_dir);
                         } else {
+                            runner.workspace().retain();
                             failures.lock().expect("failure list").push(report(
                                 fixture,
                                 flags,

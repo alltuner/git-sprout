@@ -31,6 +31,7 @@ fn random_repositories_and_flags_match_git() {
                 if result.differences.is_empty() {
                     runner.release(&result.case_dir);
                 } else {
+                    runner.workspace().retain();
                     failures.push(format!(
                         "seed {case_seed}{}",
                         case::report(&template.name, flags, runner.tool(), &result)
