@@ -167,7 +167,7 @@ jobs:
           workspaces: "tests/differential -> tests/differential/target"
 
       - name: Cache the kernel clone
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: tests/fixtures/cache
           key: kernel-shallow-v1-${{ matrix.os }}
