@@ -236,6 +236,15 @@ fn populate(git: &Git, destination: &Path, before: &[source::Worktree], stats: &
         stats.fall_back(format!("the repository writes index version {version}"));
         return;
     }
+    // Git keeps the shape of the index it reads, the same way it keeps the version.
+    // In a `core.splitIndex` repository a plain `git worktree add` writes a small
+    // index carrying a `link` extension, with the entries in a `sharedindex` file;
+    // a scratch index written whole would make git write the final one whole too,
+    // and the difference is visible in the worktree's admin directory.
+    if splits_the_index(git, destination) {
+        stats.fall_back("the repository splits the index");
+        return;
+    }
 
     let Some(source) = source::choose(git, before, destination, &head) else {
         stats.fall_back("no usable source checkout");
@@ -575,6 +584,17 @@ fn conform_to_checkout(path: &Path, planned: &Planned, umask: u32) -> Option<Sta
         metadata = Metadata::from_path_no_follow(path).ok()?;
     }
     Stat::from_fs(&metadata).ok()
+}
+
+/// Whether this repository writes a split index, from the same sources git consults.
+///
+/// `GIT_TEST_SPLIT_INDEX` is git's own test hook and is honoured for the same reason
+/// `GIT_INDEX_VERSION` is: a repository under test still has to come out identical.
+fn splits_the_index(git: &Git, destination: &Path) -> bool {
+    if std::env::var("GIT_TEST_SPLIT_INDEX").as_deref() == Ok("1") {
+        return true;
+    }
+    git.config(destination, "core.splitIndex").as_deref() == Some("true")
 }
 
 /// The permissions a checkout gives a path with this tree mode.
