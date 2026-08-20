@@ -1,6 +1,6 @@
 [package]
 name = "git-sprout"
-version = "0.0.0"
+version = "0.1.0"
 edition = "2021"
 rust-version = "1.85"
 description = "A drop-in git worktree add that materialises the tree with filesystem copy-on-write clones"
