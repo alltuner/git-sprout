@@ -55,12 +55,35 @@ jobs:
           RP_VERSION: ${{ needs.release-please.outputs.version }}
         run: |
           if [ -n "$DISPATCH_TAG" ]; then
-            echo "tag=$DISPATCH_TAG" >> "$GITHUB_OUTPUT"
-            echo "version=${DISPATCH_TAG#v}" >> "$GITHUB_OUTPUT"
+            TAG="$DISPATCH_TAG"
+            # The tag carries the component, `git-sprout-v0.1.0`, so stripping a
+            # leading "v" leaves the whole tag behind and the formula ends up
+            # declaring a version of "git-sprout-v0.1.0".
+            VERSION="${DISPATCH_TAG##*-v}"
           elif [ "$RP_CREATED" = "true" ]; then
-            echo "tag=$RP_TAG" >> "$GITHUB_OUTPUT"
-            echo "version=$RP_VERSION" >> "$GITHUB_OUTPUT"
+            TAG="$RP_TAG"
+            VERSION="$RP_VERSION"
+          else
+            TAG=""
+            VERSION=""
           fi
+
+          # Refuse to resolve nothing. Every publishing job is guarded on this output
+          # being non-empty, so an empty one skips them all and leaves a green run that
+          # tagged a release and shipped no binaries, no crate and no formula. Failing
+          # here turns that silence into a red build.
+          if [ -z "$TAG" ] || [ -z "$VERSION" ]; then
+            echo "resolved no tag to publish: this run would have shipped nothing." >&2
+            echo "  dispatch tag: '${DISPATCH_TAG}'" >&2
+            echo "  release-please created: '${RP_CREATED}' tag: '${RP_TAG}' version: '${RP_VERSION}'" >&2
+            echo "If release-please did create a release, its outputs are keyed by" >&2
+            echo "package path and this workflow is reading the wrong names." >&2
+            exit 1
+          fi
+
+          echo "publishing $TAG as version $VERSION"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
   publish-crate:
     needs: [release-please, resolve-tag]
