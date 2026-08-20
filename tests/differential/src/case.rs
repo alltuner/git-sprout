@@ -212,6 +212,7 @@ pub fn check_fixture(fixture: &str, cases: &[&FlagCase]) {
 
     let next = AtomicUsize::new(0);
     let failures = Mutex::new(Vec::<String>::new());
+    let failed_cases = Mutex::new(Vec::<&FlagCase>::new());
     let unstable = Mutex::new(Vec::<String>::new());
 
     // One verdict per fixture per run, established before any case is judged.
@@ -247,6 +248,7 @@ pub fn check_fixture(fixture: &str, cases: &[&FlagCase]) {
                             runner.release(&result.case_dir);
                         } else {
                             runner.workspace().retain();
+                            failed_cases.lock().expect("failed cases").push(flags);
                             failures.lock().expect("failure list").push(report(
                                 fixture,
                                 flags,
@@ -271,6 +273,20 @@ pub fn check_fixture(fixture: &str, cases: &[&FlagCase]) {
     // times in a row often enough to matter, and each such case is then reported as a
     // parity failure. One confirmed observation is worth more than eight unconfirmed
     // agreements, and this is where the asymmetry finally gets applied properly.
+    // A case that actually diverged is the one whose determinism is in question, and
+    // it is a far better subject than the arbitrary case picked up front: the opening
+    // probe can report "deterministic" simply because the case it happened to choose
+    // flips less often than the ones that failed. So if anything failed, ask again
+    // using a case that failed.
+    let failed_cases = failed_cases.into_inner().expect("failed cases");
+    if unstable.is_empty() && collision_sensitive(fixture) {
+        if let Some(culprit) = failed_cases.first() {
+            if let Some(evidence) = control_is_unstable(&runner, &template, culprit) {
+                unstable.push(evidence);
+            }
+        }
+    }
+
     if !unstable.is_empty() && !failures.is_empty() {
         unstable.push(format!(
             "{} further case(s) after git was caught disagreeing with itself",
