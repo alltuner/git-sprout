@@ -142,6 +142,18 @@ fn check_acceleration(candidate: &Snapshot) {
         return;
     };
     println!("candidate statistics: {stats:?}");
+    if !stats.supports_cloning() {
+        // GitHub's Linux runners put the scratch tree on ext4, which has no block
+        // cloning at all, so the tool correctly falls back and nothing is cloned.
+        // Every parity check has already run by the time this function is called;
+        // only the claim that the fast path fired is meaningless here.
+        println!(
+            "this filesystem has no block cloning ({:?}); parity is asserted, \
+             acceleration is not",
+            stats.fallback_reason
+        );
+        return;
+    }
     assert!(
         stats.accelerated(),
         "nothing was cloned on the fixture that exists to prove cloning works \
