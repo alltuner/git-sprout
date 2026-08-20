@@ -25,9 +25,13 @@ jobs:
   release-please:
     runs-on: ubuntu-latest
     outputs:
-      release_created: ${{ steps.release.outputs.release_created }}
-      tag_name: ${{ steps.release.outputs.tag_name }}
-      version: ${{ steps.release.outputs.version }}
+      # release-please prefixes every output with the package path when it is driven
+      # by a manifest, even for a single package. The unprefixed names are always
+      # empty, which silently skips every publishing job while still tagging the
+      # release — an empty v0.1.0 was cut that way.
+      release_created: ${{ steps.release.outputs['crates/git-sprout--release_created'] }}
+      tag_name: ${{ steps.release.outputs['crates/git-sprout--tag_name'] }}
+      version: ${{ steps.release.outputs['crates/git-sprout--version'] }}
     steps:
       - id: release
         if: github.event_name != 'workflow_dispatch' || inputs.tag == ''
