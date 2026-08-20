@@ -226,7 +226,11 @@ pub fn check_fixture(fixture: &str, cases: &[&FlagCase]) {
     // sample large enough to trust, and turns the answer into a single reported fact
     // about the filesystem rather than a judgement that can differ between cases that
     // are physically identical.
-    if collision_sensitive(fixture) {
+    //
+    // Self-test mode needs none of it. There both sides are already real git, so every
+    // case below is itself a control run, and a wider variety of them than one probe
+    // repeated. Buying a narrower sample first would only cost time.
+    if collision_sensitive(fixture) && !runner.tool().is_self_test() {
         if let Some(probe) = cases.first() {
             if let Some(evidence) = control_is_unstable(&runner, &template, probe) {
                 unstable.lock().expect("unstable list").push(evidence);
@@ -278,10 +282,22 @@ pub fn check_fixture(fixture: &str, cases: &[&FlagCase]) {
     // probe can report "deterministic" simply because the case it happened to choose
     // flips less often than the ones that failed. So if anything failed, ask again
     // using a case that failed.
+    // In self-test mode there is nothing left to ask. Real git ran on both sides of the
+    // case that diverged, so the divergence *is* git contradicting itself, observed
+    // first-hand rather than inferred. Sending it to the probe for confirmation inverts
+    // the asymmetry the probe exists to respect: the probe can only fail to reproduce a
+    // disagreement, never unmake the one already in hand, so a pair that flips rarely
+    // gets its genuine flip overruled by twenty-five agreements that prove nothing.
+    // That is precisely how a platform race reaches the log as a parity failure.
     let failed_cases = failed_cases.into_inner().expect("failed cases");
     if unstable.is_empty() && collision_sensitive(fixture) {
         if let Some(culprit) = failed_cases.first() {
-            if let Some(evidence) = control_is_unstable(&runner, &template, culprit) {
+            if runner.tool().is_self_test() {
+                unstable.push(format!(
+                    "git contradicted itself on `{}`, with real git on both sides",
+                    culprit.name
+                ));
+            } else if let Some(evidence) = control_is_unstable(&runner, &template, culprit) {
                 unstable.push(evidence);
             }
         }
