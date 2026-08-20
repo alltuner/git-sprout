@@ -56,29 +56,32 @@ jobs:
         run: |
           if [ -n "$DISPATCH_TAG" ]; then
             TAG="$DISPATCH_TAG"
-            # The tag carries the component, `git-sprout-v0.1.0`, so stripping a
-            # leading "v" leaves the whole tag behind and the formula ends up
-            # declaring a version of "git-sprout-v0.1.0".
+            # The tag carries the component and reads `git-sprout-v0.1.0`, so
+            # stripping a leading "v" leaves the whole tag behind and the formula
+            # declares a version of the tag.
             VERSION="${DISPATCH_TAG##*-v}"
           elif [ "$RP_CREATED" = "true" ]; then
             TAG="$RP_TAG"
             VERSION="$RP_VERSION"
-          else
-            TAG=""
-            VERSION=""
-          fi
 
-          # Refuse to resolve nothing. Every publishing job is guarded on this output
-          # being non-empty, so an empty one skips them all and leaves a green run that
-          # tagged a release and shipped no binaries, no crate and no formula. Failing
-          # here turns that silence into a red build.
-          if [ -z "$TAG" ] || [ -z "$VERSION" ]; then
-            echo "resolved no tag to publish: this run would have shipped nothing." >&2
-            echo "  dispatch tag: '${DISPATCH_TAG}'" >&2
-            echo "  release-please created: '${RP_CREATED}' tag: '${RP_TAG}' version: '${RP_VERSION}'" >&2
-            echo "If release-please did create a release, its outputs are keyed by" >&2
-            echo "package path and this workflow is reading the wrong names." >&2
-            exit 1
+            # A release was cut and yet there is nothing to publish. That is the case
+            # that ships a tagged release with no binaries, no crate and no formula
+            # while reporting success, because every publishing job is guarded on
+            # these outputs being non-empty and skipping is not failing. It happened
+            # to v0.1.0 and it has to be loud.
+            if [ -z "$TAG" ] || [ -z "$VERSION" ]; then
+              echo "release-please created a release but resolved no tag." >&2
+              echo "  created='${RP_CREATED}' tag='${RP_TAG}' version='${RP_VERSION}'" >&2
+              echo "Its outputs are keyed by package path when driven by a manifest;" >&2
+              echo "this workflow is probably reading the wrong names." >&2
+              exit 1
+            fi
+          else
+            # An ordinary commit that release-please did not turn into a release.
+            # Nothing to publish and nothing wrong: the publishing jobs skip on the
+            # empty outputs and the run stays green.
+            echo "no release for this commit; nothing to publish"
+            exit 0
           fi
 
           echo "publishing $TAG as version $VERSION"
