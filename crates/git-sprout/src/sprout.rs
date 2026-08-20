@@ -236,6 +236,15 @@ fn populate(git: &Git, destination: &Path, before: &[source::Worktree], stats: &
         stats.fall_back(format!("the repository writes index version {version}"));
         return;
     }
+    // Git keeps the shape of the index it reads, the same way it keeps the version.
+    // In a `core.splitIndex` repository a plain `git worktree add` writes a small
+    // index carrying a `link` extension, with the entries in a `sharedindex` file;
+    // a scratch index written whole would make git write the final one whole too,
+    // and the difference is visible in the worktree's admin directory.
+    if splits_the_index(git, destination) {
+        stats.fall_back("the repository splits the index");
+        return;
+    }
 
     let Some(source) = source::choose(git, before, destination, &head) else {
         stats.fall_back("no usable source checkout");
@@ -288,7 +297,12 @@ fn populate(git: &Git, destination: &Path, before: &[source::Worktree], stats: &
         &source_attributes,
         &dirty_attributes,
     );
-    let (colliding, colliding_prefixes) = plan::colliding_paths(&target);
+    let source_paths: Vec<Vec<u8>> = source_index
+        .entries()
+        .iter()
+        .map(|entry| entry.path(&source_index).to_vec())
+        .collect();
+    let (colliding, colliding_prefixes) = plan::colliding_paths(&target, &source_paths);
     poisoned.extend(colliding_prefixes);
 
     let mut verified = plan::verify_paths(&target, &source_index, &source, &poisoned, &colliding);
@@ -577,6 +591,17 @@ fn conform_to_checkout(path: &Path, planned: &Planned, umask: u32) -> Option<Sta
     Stat::from_fs(&metadata).ok()
 }
 
+/// Whether this repository writes a split index, from the same sources git consults.
+///
+/// `GIT_TEST_SPLIT_INDEX` is git's own test hook and is honoured for the same reason
+/// `GIT_INDEX_VERSION` is: a repository under test still has to come out identical.
+fn splits_the_index(git: &Git, destination: &Path) -> bool {
+    if std::env::var("GIT_TEST_SPLIT_INDEX").as_deref() == Ok("1") {
+        return true;
+    }
+    git.config(destination, "core.splitIndex").as_deref() == Some("true")
+}
+
 /// The permissions a checkout gives a path with this tree mode.
 fn checkout_mode(mode: u32, umask: u32) -> u32 {
     let base = if mode == EXECUTABLE_MODE {
@@ -605,6 +630,10 @@ fn set_mode(_path: &Path, _mode: u32) {}
 /// back. Nothing else in the process creates files while this runs.
 #[cfg(unix)]
 fn umask() -> u32 {
+    // `mode_t` is 16 bits on macOS and 32 on Linux, so the widening is a real
+    // conversion on one target and a no-op on the other. Neither target should
+    // have to spell the type out.
+    #[allow(clippy::useless_conversion)]
     // SAFETY: single-threaded at this point, so no other file creation can see the gap.
     unsafe {
         let previous = libc::umask(0);
@@ -634,10 +663,13 @@ mod tests {
 
     #[test]
     fn applies_every_dash_c_in_order() {
-        let globals = ["-C", "/repo", "-c", "x=y", "-C", "sub"]
+        // The first -C is spelled as this platform spells an absolute path, so the
+        // test asserts the ordering rather than the separator.
+        let root = if cfg!(windows) { "C:\\repo" } else { "/repo" };
+        let globals = ["-C", root, "-c", "x=y", "-C", "sub"]
             .iter()
             .map(OsString::from)
             .collect::<Vec<_>>();
-        assert_eq!(working_directory(&globals), PathBuf::from("/repo/sub"));
+        assert_eq!(working_directory(&globals), PathBuf::from(root).join("sub"));
     }
 }

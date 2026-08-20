@@ -203,6 +203,38 @@ explicitly. The harness keeps the final frame precisely so this stays visible.
 
 ---
 
+## 14. §3.5.1's premise fails where git is not deterministic
+
+§3.5.1 rests on "whatever `git worktree add` leaves behind is the correct answer by
+definition". That assumes git leaves behind the *same* thing twice. On a ReFS volume it
+does not.
+
+Measured in CI (run 32346338823, `windows / ReFS`), with **real git on both sides**:
+
+```
+4 of 41 flag cases diverged for fixture case-collision:
+  default              only in candidate:  " M net/XT_MARK.h"
+  last-negation-wins   only in control:    " M net/XT_MARK.h"
+  no-detach            only in candidate:  " M net/XT_MARK.h"
+  track-remote         only in candidate:  " M net/XT_MARK.h"
+```
+
+Two runs of `git worktree add` with identical argv leave a different member of a
+case-colliding pair on disk. Both directions appear in a single run, which is the shape
+of a race rather than of a difference. `git worktree add` settles a collision by
+whichever entry it writes last, and on that filesystem the order is not stable.
+
+Where that is true there is no winner for an implementation to reproduce, so the suite
+compares those cases by shape — same number of dirty paths, same membership up to which
+member of each case-folded group won, and the surviving file's content matching one of
+the group's blobs — and says so in its output. The fallback is keyed on measuring the
+control against itself, not on a platform name, so it disappears the day the behaviour
+becomes deterministic and no other fixture can reach it.
+
+**This looks like an upstream bug and the reproduction is above.** Nothing in the tool
+depends on it being fixed, and a stable resolution order would let the suite tighten
+itself automatically, so it is worth reporting.
+
 ## Found while implementing the tool
 
 Raised rather than quietly worked around. The implementation takes the safe route in

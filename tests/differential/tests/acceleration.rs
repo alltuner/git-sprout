@@ -5,27 +5,25 @@ use differential::case::{Outcome, Runner};
 use differential::flags;
 use differential::run::Tool;
 
-/// Fixtures whose whole point is that cloning fires. `autocrlf` is the one that
-/// proves index-based verification works: every text file's working-tree bytes
-/// differ from its blob, so a rule that excludes converted paths accelerates
-/// nothing there - and `core.autocrlf=true` is the Git for Windows installer
-/// default, so "nothing there" means "nothing on Windows".
-const ACCELERATED: &[&str] = &["text-heavy", "autocrlf"];
+/// Fixtures whose whole point is that cloning fires.
+const ACCELERATED: &[&str] = &["text-heavy"];
 
-/// Extra context for the fixture that exists to catch exactly one design mistake.
-fn why_it_matters(fixture: &str) -> &'static str {
-    if fixture == "autocrlf" {
-        "\n  This is the case spec §3.4 and §6.1 single out: the index-based rule in \
-         §4 step 5 exists so that a repository where every text file is converted on \
-         checkout still accelerates. A blanket exclusion of converting paths is safe \
-         but reduces acceleration to zero on the Git for Windows default. Note that \
-         `git ls-files --eol` reports w/crlf against w/lf per path in one call, which \
-         distinguishes a source that already holds the checked-out form from one that \
-         does not, without reading any file."
-    } else {
-        ""
-    }
-}
+/// Fixtures where cloning is expected to fire on nothing at all.
+///
+/// This inverts what spec §8 asks for, deliberately. §8 says to assert `cloned > 0`
+/// on `core.autocrlf=true`, because §4 step 5's index-based rule was meant to make a
+/// repository whose every text file is converted on checkout accelerate normally.
+/// That rule turned out to be unsound: a stat-clean index entry means the working
+/// tree file *cleans back* to the blob, not that it equals what a checkout would
+/// write, and under `eol=crlf` a hand-written all-LF file is both clean and not what
+/// a checkout writes. The tool therefore clones only where no conversion applies,
+/// and a converting repository accelerates nothing. That cost was weighed and
+/// accepted rather than overlooked, and the documentation states it.
+///
+/// So this asserts the decision holds. If a future change starts cloning converted
+/// paths, that is a correctness regression and this test is what catches it — do not
+/// "fix" it by moving the fixture back into ACCELERATED.
+const NOT_ACCELERATED: &[&str] = &["autocrlf"];
 
 #[test]
 fn the_fast_path_is_taken_where_the_fixture_exists_to_prove_it() {
@@ -61,14 +59,49 @@ fn the_fast_path_is_taken_where_the_fixture_exists_to_prove_it() {
             Some(stats) => {
                 measured += 1;
                 println!("{fixture}: {stats:?}");
-                if !stats.accelerated() {
+                if !stats.supports_cloning() {
+                    println!(
+                        "{fixture}: this filesystem has no block cloning ({:?}); \
+                         the fast path cannot be asserted here",
+                        stats.fallback_reason
+                    );
+                } else if !stats.accelerated() {
                     failures.push(format!(
                         "{fixture}: nothing was cloned (cloned={}, skipped={}, reason={:?}); \
-                         the output may be right but the fast path never ran{}",
-                        stats.cloned,
-                        stats.skipped,
-                        stats.fallback_reason,
-                        why_it_matters(fixture)
+                         the output may be right but the fast path never ran",
+                        stats.cloned, stats.skipped, stats.fallback_reason,
+                    ));
+                }
+            }
+        }
+    }
+
+    for fixture in NOT_ACCELERATED {
+        let template = runner.template(fixture).expect("fixture builder");
+        if let Some(reason) = &template.skipped {
+            println!("skipped fixture {fixture}: {reason}");
+            continue;
+        }
+        let Outcome::Ran(result) = runner.run(&template, flags, None).expect("case run") else {
+            continue;
+        };
+        assert!(
+            result.differences.is_empty(),
+            "{fixture} diverged: {:?}",
+            result.differences
+        );
+        match &result.candidate.stats {
+            None => silent.push(fixture),
+            Some(stats) => {
+                measured += 1;
+                println!("{fixture}: {stats:?}");
+                if stats.accelerated() {
+                    failures.push(format!(
+                        "{fixture}: cloned {} paths, but a converting repository must clone \
+                         none. Cloning a path a checkout would rewrite produces a worktree \
+                         that differs from git's while `git status` stays clean in both. \
+                         See NOTES-spec-disagreement.md, the §3.4 item.",
+                        stats.cloned
                     ));
                 }
             }

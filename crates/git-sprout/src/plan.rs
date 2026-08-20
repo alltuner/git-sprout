@@ -61,30 +61,50 @@ pub struct Plan {
 /// slow rather than wrong.
 ///
 /// On a case-sensitive filesystem this costs a handful of paths and changes nothing else.
-pub fn colliding_paths(target: &Listing) -> (HashSet<Vec<u8>>, Vec<Vec<u8>>) {
-    let mut by_folded: HashMap<Vec<u8>, Vec<&Vec<u8>>> = HashMap::new();
+pub fn colliding_paths(
+    target: &Listing,
+    source_paths: &[Vec<u8>],
+) -> (HashSet<Vec<u8>>, Vec<Vec<u8>>) {
+    // Keyed on the folded name, holding the distinct spellings seen under it. A set
+    // rather than a list because the same path arrives from both the target tree and
+    // the source index, and counting one path twice would make every path in the
+    // repository look like a collision with itself.
+    let mut by_folded: HashMap<Vec<u8>, HashSet<Vec<u8>>> = HashMap::new();
+    // Folded over the source's paths as well as the target's, because the hazard lives
+    // in the source's filesystem rather than in either tree. Where two paths differ only
+    // by case the operating system keeps one file for both names, and the bytes behind
+    // the surviving name may belong to either member. A pair that exists at the source's
+    // HEAD but not in the target — a detached checkout, a tag, any commit where one
+    // member was added or removed — is invisible to the target alone, and the surviving
+    // path then looks like an ordinary clonable file whose content is somebody else's.
+    //
+    // Widening costs a handful of clones that would have been safe. The alternative
+    // costs a worktree that differs from git's.
     let named = target
         .blobs
         .keys()
         .chain(target.trees.keys())
-        .chain(target.gitlinks.iter());
+        .chain(target.gitlinks.iter())
+        .chain(source_paths.iter());
     for path in named {
         by_folded
             .entry(path.to_ascii_lowercase())
             .or_default()
-            .push(path);
+            .insert(path.clone());
     }
 
     let mut paths = HashSet::new();
     let mut prefixes = Vec::new();
     for (_, group) in by_folded.into_iter().filter(|(_, group)| group.len() > 1) {
         for path in group {
-            if target.trees.contains_key(path) {
+            // A source-only path is not in the plan to begin with; naming it here would
+            // be harmless but misleading. What matters is that its *target* twin is.
+            if target.trees.contains_key(&path) {
                 let mut prefix = path.clone();
                 prefix.push(b'/');
                 prefixes.push(prefix);
             }
-            paths.insert(path.clone());
+            paths.insert(path);
         }
     }
     prefixes.sort();
@@ -372,6 +392,27 @@ mod tests {
         }
     }
 
+    /// A pair that exists in the source but not in the target is still a collision:
+    /// the source's filesystem keeps one file for both names, so the survivor's bytes
+    /// may belong to either member. Regression for a divergence seen only under
+    /// `--detach` and a tag, where the target resolves to a commit the pair straddles.
+    #[test]
+    fn a_pair_only_the_source_has_still_disqualifies_the_target_twin() {
+        let listing = listing(&[("net/xt_mark.h", 0)], &[], &[]);
+        let (bare, _) = colliding_paths(&listing, &[]);
+        assert!(
+            bare.is_empty(),
+            "the target alone names no pair, so nothing collides"
+        );
+
+        let source = vec![b"net/xt_mark.h".to_vec(), b"net/XT_MARK.h".to_vec()];
+        let (widened, _) = colliding_paths(&listing, &source);
+        assert!(
+            widened.contains(b"net/xt_mark.h".as_slice()),
+            "the target's member of a pair the source holds must be dropped from the plan"
+        );
+    }
+
     #[test]
     fn maps_every_directory_to_its_own_children() {
         let listing = listing(
@@ -427,7 +468,7 @@ mod tests {
             &[("net", 4)],
             &[],
         );
-        let (paths, prefixes) = colliding_paths(&listing);
+        let (paths, prefixes) = colliding_paths(&listing, &[]);
         assert!(paths.contains(b"net/xt_MARK.c".as_slice()));
         assert!(paths.contains(b"net/xt_mark.c".as_slice()));
         assert!(!paths.contains(b"net/other.c".as_slice()));
@@ -441,7 +482,7 @@ mod tests {
             &[("Net", 3), ("net", 4)],
             &[],
         );
-        let (paths, prefixes) = colliding_paths(&listing);
+        let (paths, prefixes) = colliding_paths(&listing, &[]);
         assert!(paths.contains(b"Net".as_slice()));
         assert_eq!(prefixes, vec![b"Net/".to_vec(), b"net/".to_vec()]);
     }
@@ -449,7 +490,7 @@ mod tests {
     #[test]
     fn a_tree_and_a_blob_that_fold_together_both_go_to_git() {
         let listing = listing(&[("Doc", 1), ("doc/a.c", 2)], &[("doc", 3)], &[]);
-        let (paths, prefixes) = colliding_paths(&listing);
+        let (paths, prefixes) = colliding_paths(&listing, &[]);
         assert!(paths.contains(b"Doc".as_slice()));
         assert!(paths.contains(b"doc".as_slice()));
         assert_eq!(prefixes, vec![b"doc/".to_vec()]);

@@ -25,9 +25,13 @@ jobs:
   release-please:
     runs-on: ubuntu-latest
     outputs:
-      release_created: ${{ steps.release.outputs.release_created }}
-      tag_name: ${{ steps.release.outputs.tag_name }}
-      version: ${{ steps.release.outputs.version }}
+      # release-please prefixes every output with the package path when it is driven
+      # by a manifest, even for a single package. The unprefixed names are always
+      # empty, which silently skips every publishing job while still tagging the
+      # release — an empty v0.1.0 was cut that way.
+      release_created: ${{ steps.release.outputs['crates/git-sprout--release_created'] }}
+      tag_name: ${{ steps.release.outputs['crates/git-sprout--tag_name'] }}
+      version: ${{ steps.release.outputs['crates/git-sprout--version'] }}
     steps:
       - id: release
         if: github.event_name != 'workflow_dispatch' || inputs.tag == ''
@@ -51,12 +55,38 @@ jobs:
           RP_VERSION: ${{ needs.release-please.outputs.version }}
         run: |
           if [ -n "$DISPATCH_TAG" ]; then
-            echo "tag=$DISPATCH_TAG" >> "$GITHUB_OUTPUT"
-            echo "version=${DISPATCH_TAG#v}" >> "$GITHUB_OUTPUT"
+            TAG="$DISPATCH_TAG"
+            # The tag carries the component and reads `git-sprout-v0.1.0`, so
+            # stripping a leading "v" leaves the whole tag behind and the formula
+            # declares a version of the tag.
+            VERSION="${DISPATCH_TAG##*-v}"
           elif [ "$RP_CREATED" = "true" ]; then
-            echo "tag=$RP_TAG" >> "$GITHUB_OUTPUT"
-            echo "version=$RP_VERSION" >> "$GITHUB_OUTPUT"
+            TAG="$RP_TAG"
+            VERSION="$RP_VERSION"
+
+            # A release was cut and yet there is nothing to publish. That is the case
+            # that ships a tagged release with no binaries, no crate and no formula
+            # while reporting success, because every publishing job is guarded on
+            # these outputs being non-empty and skipping is not failing. It happened
+            # to v0.1.0 and it has to be loud.
+            if [ -z "$TAG" ] || [ -z "$VERSION" ]; then
+              echo "release-please created a release but resolved no tag." >&2
+              echo "  created='${RP_CREATED}' tag='${RP_TAG}' version='${RP_VERSION}'" >&2
+              echo "Its outputs are keyed by package path when driven by a manifest;" >&2
+              echo "this workflow is probably reading the wrong names." >&2
+              exit 1
+            fi
+          else
+            # An ordinary commit that release-please did not turn into a release.
+            # Nothing to publish and nothing wrong: the publishing jobs skip on the
+            # empty outputs and the run stays green.
+            echo "no release for this commit; nothing to publish"
+            exit 0
           fi
+
+          echo "publishing $TAG as version $VERSION"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
   publish-crate:
     needs: [release-please, resolve-tag]
@@ -72,9 +102,26 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: rust-lang/crates-io-auth-action@v1
         id: auth
-      - run: cargo publish -p git-sprout
+      # Re-running a release must be safe. A version can only be published once, so a
+      # dispatch that exists to regenerate a binary or a formula would otherwise fail
+      # here and take the rest of the run with it.
+      - name: Publish unless this version is already on crates.io
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+          VERSION: ${{ needs.resolve-tag.outputs.version }}
+        run: |
+          published=$(curl -sS -H "User-Agent: git-sprout release workflow" \
+            "https://crates.io/api/v1/crates/git-sprout/versions" \
+            | python3 -c "import json,sys; print(' '.join(v['num'] for v in json.load(sys.stdin)['versions']))" \
+            2>/dev/null || echo "")
+          case " $published " in
+            *" $VERSION "*)
+              echo "git-sprout $VERSION is already on crates.io; nothing to publish."
+              ;;
+            *)
+              cargo publish -p git-sprout
+              ;;
+          esac
 
   build-binaries:
     needs: [release-please, resolve-tag]

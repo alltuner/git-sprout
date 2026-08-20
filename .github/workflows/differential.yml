@@ -131,6 +131,17 @@ jobs:
       - name: Build the tool
         run: cargo build --release -p git-sprout
 
+      # Real git on both sides, on ReFS. Without this there is no control for the
+      # Windows fast path: a divergence in the job below could be the tool or it
+      # could be git behaving differently on a case-insensitive volume, and the two
+      # are indistinguishable from a single-sided run. Runs first so its answer is
+      # in the log even when the tool run fails.
+      - name: Differential suite on ReFS, self-test
+        shell: bash
+        env:
+          SPROUT_TEST_TMPDIR: 'R:\scratch'
+        run: cargo test --release --manifest-path $MANIFEST -- --nocapture
+
       - name: Differential suite on ReFS
         shell: bash
         env:

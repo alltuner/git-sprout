@@ -51,6 +51,20 @@ impl Stats {
     /// The test is `cloned`, not `fell_back`: a partial demotion sets
     /// `fallback_reason` while still having cloned most of the tree, and the
     /// question this answers is whether acceleration happened at all.
+    /// False when the run fell back because the filesystem cannot clone blocks at
+    /// all — ext4, NTFS, tmpfs. Acceleration is not assertable there, and the
+    /// fallback being correct is what the rest of the suite checks.
+    pub fn supports_cloning(&self) -> bool {
+        match self.fallback_reason.as_deref() {
+            // The tool prefixes every rejection by the clone primitive itself with
+            // this phrase. Matching the prefix rather than the operating system's
+            // wording keeps the check working on ext4, NTFS and tmpfs alike, which
+            // each phrase "this filesystem does not do that" differently.
+            Some(reason) => !reason.starts_with("cloning a file failed"),
+            None => true,
+        }
+    }
+
     pub fn accelerated(&self) -> bool {
         self.cloned > 0
     }

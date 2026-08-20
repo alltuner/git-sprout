@@ -23,6 +23,20 @@ if [ -z "$(git -C "$KERNEL" ls-files | head -1)" ]; then
     git -C "$KERNEL" checkout
 fi
 
+# A restored cache, or any other copy of the repository, arrives with new inodes and
+# fresh mtimes, so every index entry is stat-dirty even though every file is
+# byte-identical. The tool trusts a path only when the source's index entry is
+# stat-clean (spec section 4 step 5a), so without this refresh the plan comes back
+# empty and the fixture measures nothing while still passing every parity check.
+# Rebuilding the stat cache costs one pass and is what git itself would do.
+echo "refreshing the index stat cache"
+git -C "$KERNEL" update-index --refresh >/dev/null 2>&1 || true
+
+dirty="$(git -C "$KERNEL" diff-files --name-only | wc -l | tr -d ' ')"
+if [ "$dirty" -gt 0 ]; then
+    echo "warning: $dirty paths remain stat-dirty after the refresh; acceleration will be reduced" >&2
+fi
+
 tracked="$(git -C "$KERNEL" ls-files | wc -l | tr -d ' ')"
 echo "kernel fixture ready: $tracked tracked files at $(git -C "$KERNEL" rev-parse --short HEAD)"
 echo

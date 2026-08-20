@@ -21,11 +21,13 @@
 ---
 
 > [!NOTE]
-> **Verified on macOS.** The compatibility contract below is checked against real
-> `git worktree add` by a differential suite that passes 28 repository fixtures and the
-> Linux kernel, and that proves itself by detecting nineteen injected differences. The
-> Linux and Windows suites have not run yet, and the smaller benchmark rows are still
-> the research prototype's rather than this implementation's.
+> **Checked on every commit.** The contract below is compared against real
+> `git worktree add` across 28 repository fixtures and 41 argument shapes, on macOS,
+> Linux (btrfs, XFS, ext4) and Windows (NTFS, ReFS), plus the Linux kernel on two
+> filesystems. The suite proves itself by detecting nineteen deliberately injected
+> differences and finding none when git is compared against itself. The kernel figures
+> are measured on the released binary; the smaller benchmark rows are still the
+> research prototype's.
 
 ## Get Started
 
@@ -67,14 +69,14 @@ bytes.
 
 | workload | `git worktree add` | `git sprout add` |
 | --- | --- | --- |
-| **Linux kernel, <!--bench:kernel.files-->95 056<!--/bench--> files, <!--bench:kernel.bytes-->2.0 GB<!--/bench-->** | **<!--bench:kernel.time.git-->11.06s<!--/bench--> · <!--bench:kernel.disk.git-->1814 MB<!--/bench-->** | **<!--bench:kernel.time.sprout-->11.51s<!--/bench--> · <!--bench:kernel.disk.sprout-->44 MB<!--/bench-->** |
+| **Linux kernel, <!--bench:kernel.files-->95 299<!--/bench--> files, <!--bench:kernel.bytes-->2.0 GB<!--/bench-->** | **<!--bench:kernel.disk.git-->1816 MB<!--/bench-->** | **<!--bench:kernel.disk.sprout-->36 MB<!--/bench-->** |
 | 250 MB, 2000 files | <!--bench:medium.time.git-->0.85s<!--/bench--> · <!--bench:medium.disk.git-->251 MB<!--/bench--> | <!--bench:medium.time.sprout-->0.21s<!--/bench--> · <!--bench:medium.disk.sprout-->~0 MB<!--/bench--> |
 | 188 MB, 3000 files, source 6 commits behind | <!--bench:cross.time.git-->0.83s<!--/bench--> · <!--bench:cross.disk.git-->187 MB<!--/bench--> | <!--bench:cross.time.sprout-->0.15s<!--/bench--> · <!--bench:cross.disk.sprout-->~1.5 MB<!--/bench--> |
 | btrfs, 188 MB | <!--bench:btrfs.time.git-->0.33s<!--/bench--> · <!--bench:btrfs.disk.git-->187 MB<!--/bench--> | <!--bench:btrfs.time.sprout-->0.05s<!--/bench--> · <!--bench:btrfs.disk.sprout-->0.1 MB<!--/bench--> |
 | ext4 (no block cloning) | <!--bench:ext4.time.git-->0.41s<!--/bench--> · <!--bench:ext4.disk.git-->187 MB<!--/bench--> | falls back, identical |
 
-One worktree of the Linux kernel: <!--bench:kernel.disk.ratio-->41x<!--/bench--> less disk, and
-no meaningful difference in wall clock. That is <!--bench:kernel.disk.saved-->1.73 GB<!--/bench--> that never gets allocated every
+One worktree of the Linux kernel: <!--bench:kernel.disk.ratio-->50x<!--/bench--> less disk, and
+no meaningful difference in wall clock. That is <!--bench:kernel.disk.saved-->1.78 GB<!--/bench--> that never gets allocated every
 time anyone creates one. Ten engineers with five worktrees each is
 <!--bench:fleet.disk.git-->90 GB<!--/bench--> of kernel checkouts on git, and about
 <!--bench:fleet.disk.sprout-->2 GB<!--/bench--> on sprout.
@@ -93,6 +95,30 @@ APFS image; the smaller rows are still the research prototype's. Machine:
 <!--bench:env.macos-->Apple M2, 8 cores, macOS 26.6.1, git 2.55.0<!--/bench-->; Linux
 figures on <!--bench:env.linux-->kernel 7.0.12, git 2.47.3, loopback btrfs and XFS<!--/bench-->.
 The harness in [`bench/`](bench/) re-measures them and rewrites this table.
+
+### Measuring it yourself
+
+One property will otherwise waste your afternoon. **A repository that arrives as a copy
+accelerates nothing until its stat cache is rebuilt.** `git sprout add` clones a file
+only when git already considers the source's copy unmodified, which it decides from the
+inode, size and mtime recorded in the index. A `cp -r`, an rsync, a container image
+layer, a restored CI cache or an unpacked tarball gives every file a new inode and a
+fresh mtime, so every entry looks modified even though every byte is identical. The
+plan comes back empty, the worktree is still correct, and nothing is shared.
+
+Run this once in the source repository first, and the numbers appear:
+
+```bash
+git update-index --refresh
+```
+
+Nothing else about the tool depends on it — the worktree is correct either way, which is
+exactly why it is easy to miss. Ask for the counts if you want to be certain a run
+actually cloned:
+
+```bash
+SPROUT_STATS=1 git sprout add ../wt -b feature   # cloned=… on stderr
+```
 
 ## Compatibility
 
