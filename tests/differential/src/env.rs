@@ -50,6 +50,31 @@ pub struct Workspace {
     retained: AtomicBool,
 }
 
+/// The scratch root in the spelling git will echo back, resolved once so that every
+/// path derived from it already matches.
+///
+/// The two sides of a comparison live at `<root>/a` and `<root>/b`, and the harness
+/// rewrites those prefixes to a token before comparing so the `a` and the `b` never
+/// register as a difference. That only works if the prefix it holds is the one git
+/// prints. On Windows it is not: `std::env::temp_dir()` returns the 8.3 short form,
+/// `C:\Users\RUNNER~1\AppData\Local\Temp`, while git prints the long form,
+/// `C:/Users/runneradmin/...`. The replacement then misses and every per-side path
+/// leaks into the comparison, which is why a Windows run diverges on every case
+/// rather than a few.
+///
+/// Canonicalising here rather than enumerating spellings in the normaliser keeps the
+/// knowledge in one place. The verbatim prefix Windows canonicalisation returns is
+/// stripped because git never prints it.
+fn as_git_spells_it(base: &Path) -> PathBuf {
+    let Ok(resolved) = std::fs::canonicalize(base) else {
+        return base.to_path_buf();
+    };
+    match resolved.to_string_lossy().strip_prefix(r"\\?\") {
+        Some(stripped) => PathBuf::from(stripped),
+        None => resolved,
+    }
+}
+
 impl Workspace {
     /// Creates the process-wide scratch tree. `SPROUT_TEST_TMPDIR` moves it onto a
     /// chosen filesystem, which is how the no-cloning fallback gets exercised.
@@ -59,6 +84,7 @@ impl Workspace {
             None => std::env::temp_dir(),
         };
         std::fs::create_dir_all(&base)?;
+        let base = as_git_spells_it(&base);
         let root = base.join(format!("git-sprout-diff-{}-{}", label, std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root)?;
@@ -214,4 +240,37 @@ fn sanitise(name: &str) -> String {
             }
         })
         .collect()
+}
+
+#[cfg(test)]
+mod root_spelling_tests {
+    use super::as_git_spells_it;
+    use std::path::PathBuf;
+
+    /// The root has to come back in the spelling git prints, or the per-side prefix
+    /// replacement misses and every comparison diverges. On macOS that means
+    /// `/var/folders/...` resolving to `/private/var/folders/...`; on Windows it means
+    /// the 8.3 short form resolving to the long one.
+    #[test]
+    fn resolves_to_a_path_that_exists_and_is_already_canonical() {
+        let base = std::env::temp_dir();
+        let resolved = as_git_spells_it(&base);
+        assert!(resolved.is_dir(), "the resolved root should still exist");
+        assert_eq!(
+            resolved,
+            as_git_spells_it(&resolved),
+            "resolving twice should change nothing"
+        );
+        assert!(
+            !resolved.to_string_lossy().starts_with(r"\\?\"),
+            "git never prints the verbatim prefix, so the root must not carry it"
+        );
+    }
+
+    /// A path that cannot be resolved is handed back untouched rather than lost.
+    #[test]
+    fn an_unresolvable_path_is_returned_unchanged() {
+        let missing = PathBuf::from("this-directory-does-not-exist-anywhere");
+        assert_eq!(as_git_spells_it(&missing), missing);
+    }
 }

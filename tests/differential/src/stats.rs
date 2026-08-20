@@ -56,9 +56,11 @@ impl Stats {
     /// fallback being correct is what the rest of the suite checks.
     pub fn supports_cloning(&self) -> bool {
         match self.fallback_reason.as_deref() {
-            Some(reason) => {
-                !reason.contains("not supported") && !reason.contains("Operation not permitted")
-            }
+            // The tool prefixes every rejection by the clone primitive itself with
+            // this phrase. Matching the prefix rather than the operating system's
+            // wording keeps the check working on ext4, NTFS and tmpfs alike, which
+            // each phrase "this filesystem does not do that" differently.
+            Some(reason) => !reason.starts_with("cloning a file failed"),
             None => true,
         }
     }
