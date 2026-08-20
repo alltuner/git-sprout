@@ -129,15 +129,25 @@ impl Runner {
     /// and macOS never loses the strong assertion by being caught in a branch meant
     /// for somewhere else.
     pub fn control_agrees_with_itself(&self, template: &Template, flags: &FlagCase) -> bool {
-        match self.run_against(template, flags, None, &Tool::Git) {
-            Ok(Outcome::Ran(result)) => {
-                let agrees = result.differences.is_empty();
-                self.release(&result.case_dir);
-                agrees
+        // Sampled rather than measured once. The thing being tested is a race, so a
+        // single agreeing run proves nothing: git can settle the collision the same
+        // way twice by chance and then differently on the next attempt. One
+        // disagreement anywhere is proof of instability; agreement has to hold across
+        // every sample before the divergence is treated as the tool's fault.
+        for _ in 0..CONTROL_SAMPLES {
+            match self.run_against(template, flags, None, &Tool::Git) {
+                Ok(Outcome::Ran(result)) => {
+                    let agrees = result.differences.is_empty();
+                    self.release(&result.case_dir);
+                    if !agrees {
+                        return false;
+                    }
+                }
+                // An unusable probe must not excuse a divergence.
+                Ok(Outcome::NotApplicable(_)) | Err(_) => return true,
             }
-            // An unusable probe must not excuse a divergence.
-            Ok(Outcome::NotApplicable(_)) | Err(_) => true,
         }
+        true
     }
 
     /// Runs one case with an explicitly chosen candidate side.
@@ -302,6 +312,22 @@ pub fn check_fixture(fixture: &str, cases: &[&FlagCase]) {
         failures.join("")
     );
 }
+
+/// How many times the control has to agree with itself before its agreement is believed.
+///
+/// The evidence here is asymmetric, and the whole rule turns on it. **One disagreement
+/// proves nondeterminism outright**; nothing more is needed. **One agreement proves
+/// nothing at all**, because a subject that picks a winner at random will agree with
+/// itself about half the time by chance. A rule that concluded "deterministic" from a
+/// single agreeing run would report a legitimate platform race as a parity failure
+/// roughly half the time it fired.
+///
+/// So the probe stops the moment git disagrees, and only concludes the divergence is
+/// real after this many consecutive agreements. For a coin-flip subject that is a
+/// false accusation under half a percent of the time. The cost is paid only on a case
+/// that has already diverged, and on a platform where git really is deterministic that
+/// case is a genuine bug worth eight runs of confidence.
+const CONTROL_SAMPLES: usize = 8;
 
 /// Fixtures whose subject is case folding, and the only ones allowed to fall back to a
 /// shape comparison when git turns out to be unstable.
