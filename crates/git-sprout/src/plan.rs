@@ -408,7 +408,7 @@ mod tests {
         let source = vec![b"net/xt_mark.h".to_vec(), b"net/XT_MARK.h".to_vec()];
         let (widened, _) = colliding_paths(&listing, &source);
         assert!(
-            widened.contains(&b"net/xt_mark.h".to_vec()),
+            widened.contains(b"net/xt_mark.h".as_slice()),
             "the target's member of a pair the source holds must be dropped from the plan"
         );
     }
