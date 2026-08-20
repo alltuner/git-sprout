@@ -94,6 +94,30 @@ APFS image; the smaller rows are still the research prototype's. Machine:
 figures on <!--bench:env.linux-->kernel 7.0.12, git 2.47.3, loopback btrfs and XFS<!--/bench-->.
 The harness in [`bench/`](bench/) re-measures them and rewrites this table.
 
+### Measuring it yourself
+
+One property will otherwise waste your afternoon. **A repository that arrives as a copy
+accelerates nothing until its stat cache is rebuilt.** `git sprout add` clones a file
+only when git already considers the source's copy unmodified, which it decides from the
+inode, size and mtime recorded in the index. A `cp -r`, an rsync, a container image
+layer, a restored CI cache or an unpacked tarball gives every file a new inode and a
+fresh mtime, so every entry looks modified even though every byte is identical. The
+plan comes back empty, the worktree is still correct, and nothing is shared.
+
+Run this once in the source repository first, and the numbers appear:
+
+```bash
+git update-index --refresh
+```
+
+Nothing else about the tool depends on it — the worktree is correct either way, which is
+exactly why it is easy to miss. Ask for the counts if you want to be certain a run
+actually cloned:
+
+```bash
+SPROUT_STATS=1 git sprout add ../wt -b feature   # cloned=… on stderr
+```
+
 ## Compatibility
 
 `git sprout add` is meant to be indistinguishable from `git worktree add` in every
