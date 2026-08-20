@@ -4,7 +4,8 @@
 set -euo pipefail
 
 DOCS="$(cd "$(dirname "$0")" && pwd)"
-PAGE="$DOCS/index.html"
+PAGE="${1:-$DOCS/index.html}"
+PAGE_NAME="$(basename "$PAGE")"
 
 # Budget from the site spec: 60 KB over the wire including fonts, 3 requests.
 MAX_BYTES=$((60 * 1024))
@@ -19,7 +20,7 @@ html_bytes=$(gzip -9c "$PAGE" | wc -c | tr -d ' ')
 total=$html_bytes
 requests=1
 
-printf '%-28s %8s\n' "index.html (gzip)" "$html_bytes"
+printf '%-28s %8s\n' "$PAGE_NAME (gzip)" "$html_bytes"
 for font in "$DOCS"/fonts/*.woff2; do
     [ -e "$font" ] || continue
     size=$(wc -c <"$font" | tr -d ' ')

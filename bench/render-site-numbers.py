@@ -1,5 +1,5 @@
 #!/usr/bin/env -S uv run --script
-# ABOUTME: Rewrites every figure in docs/index.html and README.md from the benchmark
+# ABOUTME: Rewrites every figure in the site pages and README.md from the benchmark
 # ABOUTME: report, so no number on either surface can be one that no script produced.
 # /// script
 # requires-python = ">=3.12"
@@ -16,7 +16,18 @@ from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_REPORT = REPO_ROOT / "bench" / "results.json"
-TARGETS: list[str] = ["docs/index.html", "README.md"]
+TARGETS: list[str] = ["docs/index.html", "docs/details.html", "README.md"]
+
+# Figures the report produces and no surface publishes, on purpose.
+#
+# The kernel wall clock is measured but never printed: on the two machines that have
+# run it, the *control* moved 39.64s to 24.18s and 10.61s to 27.40s between consecutive
+# runs, so neither could support a claim about a difference smaller than its own noise.
+# The specification asks for disk to lead and time not to be claimed. Listing them here
+# keeps them measured and unpublished rather than silently unregenerated.
+DELIBERATELY_UNPUBLISHED: frozenset[str] = frozenset(
+    {"kernel.time.git", "kernel.time.sprout"}
+)
 
 NOT_MEASURED = "not measured"
 NOT_EXERCISED = "—"
@@ -331,7 +342,7 @@ def main() -> int:
     # The check that makes this stream worth having, in both directions: a marker the
     # report cannot fill is caught above; a figure the report has and no page carries
     # is a number that quietly stopped being regenerated.
-    orphaned = (set(keys) | set(bars)) - placed
+    orphaned = (set(keys) | set(bars)) - placed - DELIBERATELY_UNPUBLISHED
     problems += [
         f"no page carries marker '{key}', so its value is not being regenerated"
         for key in sorted(orphaned)
