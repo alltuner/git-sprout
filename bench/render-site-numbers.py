@@ -16,7 +16,7 @@ from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_REPORT = REPO_ROOT / "bench" / "results.json"
-TARGETS: list[str] = ["docs/index.html", "README.md"]
+TARGETS: list[str] = ["docs/index.html", "docs/details.html", "README.md"]
 
 # Figures the report produces and no surface publishes, on purpose.
 #
@@ -311,6 +311,11 @@ def main() -> int:
     parser.add_argument(
         "--print-keys", action="store_true", help="dump every key and its value"
     )
+    parser.add_argument(
+        "--allow-baseline",
+        action="store_true",
+        help="publish a baseline-only report, placeholder sprout column and all",
+    )
     args = parser.parse_args()
 
     if not args.source.exists():
@@ -329,6 +334,19 @@ def main() -> int:
         for key in sorted(bars):
             print(f"{key}\twidth={bars[key]:.1f} of {CHART_WIDTH:.0f}")
         return 0
+
+    # A baseline-only report measured `git worktree add` on both sides, so every figure
+    # in its sprout column is a placeholder. Writing one over the pages replaces measured
+    # results with dashes and leaves the markup looking entirely healthy.
+    if report["baseline_only"] and not args.check and not args.allow_baseline:
+        print(
+            "bench: refusing to write: this report's `git sprout add` column is a "
+            "placeholder.\n"
+            "       Measure against a built binary, or pass --allow-baseline to publish "
+            "it anyway.",
+            file=sys.stderr,
+        )
+        return 1
 
     problems: list[str] = []
     placed: set[str] = set()
