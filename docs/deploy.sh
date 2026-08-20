@@ -19,10 +19,24 @@ command -v aws >/dev/null || { echo "aws cli not found." >&2; exit 1; }
 
 # Credentials come from the environment in CI and from fnox on a workstation.
 # Never printed, never written to a file.
+# The keys live in the infrastructure repository's fnox.toml rather than the global
+# one, and fnox resolves per directory, so they are invisible from here. Reading them
+# from there keeps one copy: the same `sites-key` owns every other site bucket.
+INFRA="${SITES_FNOX_DIR:-$HOME/repos/infrastructure}"
 if [ -z "${AWS_ACCESS_KEY_ID:-}" ]; then
     command -v fnox >/dev/null || { echo "no AWS credentials in the environment and no fnox." >&2; exit 1; }
-    AWS_ACCESS_KEY_ID="$(fnox get SITES_S3_ACCESS_KEY)"
-    AWS_SECRET_ACCESS_KEY="$(fnox get SITES_S3_SECRET_KEY)"
+    if ! AWS_ACCESS_KEY_ID="$(cd "$INFRA" 2>/dev/null && fnox get SITES_S3_ACCESS_KEY 2>/dev/null)" ||
+       [ -z "$AWS_ACCESS_KEY_ID" ]; then
+        {
+            echo "could not read SITES_S3_ACCESS_KEY."
+            echo "It lives in the infrastructure repository's fnox.toml, and fnox resolves"
+            echo "per directory, so it is not visible from this one. Either:"
+            echo "  - point SITES_FNOX_DIR at that checkout (currently '$INFRA'), or"
+            echo "  - export AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY yourself."
+        } >&2
+        exit 1
+    fi
+    AWS_SECRET_ACCESS_KEY="$(cd "$INFRA" && fnox get SITES_S3_SECRET_KEY)"
 fi
 export AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY
 export AWS_DEFAULT_REGION="${AWS_DEFAULT_REGION:-garage}"
