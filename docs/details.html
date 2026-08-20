@@ -1,5 +1,5 @@
 <!doctype html>
-<!-- ABOUTME: The single-page site for git-sprout, served at sprout.alltuner.com. -->
+<!-- ABOUTME: The detail page for git-sprout: measurements, algorithm, and limits. -->
 <!-- ABOUTME: Self-contained: inline CSS and JS, two self-hosted fonts, no build step. -->
 <html lang="en" data-theme="dark">
 <head>
@@ -7,19 +7,19 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 
 <title>git-sprout — how it works, and what it promises</title>
-<meta name="description" content="Every git worktree is a second full copy of your tree on disk. git-sprout is a drop-in git worktree add that shares disk blocks instead. Same command, same result, a fraction of the space.">
+<meta name="description" content="What one worktree of the Linux kernel costs, how git-sprout builds one from blocks you already have, and every case where it hands the work back to git.">
 <link rel="canonical" href="https://sprout.alltuner.com/details.html">
 
 <meta property="og:type" content="website">
-<meta property="og:url" content="https://sprout.alltuner.com/">
-<meta property="og:title" content="git-sprout — git worktree add without copying your tree">
+<meta property="og:url" content="https://sprout.alltuner.com/details.html">
+<meta property="og:title" content="git-sprout — how it works, and what it promises">
 <meta property="og:description" content="Every git worktree is a second full copy of your tree on disk. On APFS, btrfs and ReFS it does not have to be.">
 <meta property="og:image" content="https://brand.alltuner.com/social/sprout-og-1200x630.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 <meta property="og:site_name" content="All Tuner Labs">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="git-sprout — git worktree add without copying your tree">
+<meta name="twitter:title" content="git-sprout — how it works, and what it promises">
 <meta name="twitter:description" content="Every git worktree is a second full copy of your tree on disk. On APFS, btrfs and ReFS it does not have to be.">
 <meta name="twitter:image" content="https://brand.alltuner.com/social/sprout-og-1200x630.png">
 
@@ -270,7 +270,7 @@ tr.is-headline th,tr.is-headline td{font-weight:700;color:var(--fg)}
 <div class="container" style="padding-top:2.5rem">
   <p class="eyebrow"><a href="/" style="color:inherit">&larr; git-sprout</a></p>
   <h1 class="section-title" style="margin-top:.6rem">How it works, and what it promises.</h1>
-  <p class="lead" style="margin-top:1rem;max-width:62ch">The numbers, the mechanism, and every place the promise stops. The <a href="/">front page</a> is the short version.</p>
+  <p class="lead" style="margin-top:1rem;max-width:62ch">A new worktree shares its blocks with a checkout you already have, so the only disk it costs is what differs between them. The sharing is not the hard part. Being certain the result is the worktree git would have written, down to the byte, is.</p>
 </div>
 <div class="divider"></div>
 
@@ -327,7 +327,7 @@ tr.is-headline th,tr.is-headline td{font-weight:700;color:var(--fg)}
 
     <p class="note reveal" style="margin-top:1.75rem">Five worktrees each across a team of ten is <!--bench:fleet.disk.git-->90 GB<!--/bench--> of kernel checkouts today, and about <!--bench:fleet.disk.sprout-->2 GB<!--/bench--> after.</p>
 
-    <p class="note reveal">This will not make your worktrees faster. On a small repository it saves well under a second, and on the kernel the two commands finish within half a second of each other. Cloning in parallel is future work. Install it for the disk column, which holds at every size &mdash; what it costs you scales with how many files you have, not how big they are.</p>
+    <p class="note reveal">This will not make your worktrees faster. On a small repository it saves well under a second, and on the kernel the two commands finish within half a second of each other. Cloning in parallel is future work. Install it for the disk column, which holds at every size: what it costs you scales with how many files you have, not how big they are.</p>
 
     <div class="proof reveal">
       <p class="proof__label">The filesystem's own accounting: <code>btrfs filesystem du</code>, verbatim</p>
@@ -369,7 +369,7 @@ tr.is-headline th,tr.is-headline td{font-weight:700;color:var(--fg)}
     <div class="reveal">
       <p class="eyebrow">Compatibility</p>
       <h2 class="section-title">You should not be able to tell the difference.</h2>
-      <p class="lead">Every item below is checked on every commit, by a suite that performs each operation twice &mdash; once through real <code>git worktree add</code>, once through git-sprout &mdash; and compares the results. It runs 28 repository fixtures across 41 argument shapes on macOS, Linux (btrfs, XFS, ext4) and Windows (NTFS, ReFS), plus the Linux kernel on two filesystems, and earns its authority by detecting 19 deliberately injected differences and finding none when git is compared against itself.</p>
+      <p class="lead">Every item below is checked on every commit, by a suite that performs each operation twice, once through real <code>git worktree add</code> and once through git-sprout, then compares the results. It runs 28 repository fixtures across 41 argument shapes on macOS, Linux (btrfs, XFS, ext4) and Windows (NTFS, ReFS), plus the Linux kernel on two filesystems, and earns its authority by detecting 19 deliberately injected differences and finding none when git is compared against itself.</p>
     </div>
 
     <ul class="checks reveal">
@@ -386,7 +386,7 @@ tr.is-headline th,tr.is-headline td{font-weight:700;color:var(--fg)}
 
     <p class="note reveal">And on a big repository <code>git worktree add</code> prints a progress meter while it writes the files out. sprout has almost no files left to write, so git never starts one: you see less output because less happened.</p>
 
-    <p class="note reveal">Beyond those two, and beyond time and disk, anything you can tell apart is a bug &mdash; and <a href="https://github.com/alltuner/git-sprout/tree/main/tests/differential">this is the suite meant to catch it before you do</a>.</p>
+    <p class="note reveal">Beyond those two, and beyond time and disk, anything you can tell apart is a bug, and <a href="https://github.com/alltuner/git-sprout/tree/main/tests/differential">this is the suite meant to catch it before you do</a>.</p>
   </div>
 </section>
 
