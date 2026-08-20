@@ -297,7 +297,12 @@ fn populate(git: &Git, destination: &Path, before: &[source::Worktree], stats: &
         &source_attributes,
         &dirty_attributes,
     );
-    let (colliding, colliding_prefixes) = plan::colliding_paths(&target);
+    let source_paths: Vec<Vec<u8>> = source_index
+        .entries()
+        .iter()
+        .map(|entry| entry.path(&source_index).to_vec())
+        .collect();
+    let (colliding, colliding_prefixes) = plan::colliding_paths(&target, &source_paths);
     poisoned.extend(colliding_prefixes);
 
     let mut verified = plan::verify_paths(&target, &source_index, &source, &poisoned, &colliding);
