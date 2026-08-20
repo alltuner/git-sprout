@@ -248,7 +248,7 @@ tr.is-headline th,tr.is-headline td{font-weight:700;color:var(--fg)}
 
 <div class="status">
   <div class="container">
-    <b>Verified on macOS.</b> The compatibility contract below is checked against real <code>git worktree add</code> by a differential suite that passes 28 repository fixtures and the Linux kernel. The Linux and Windows suites have not run yet.
+    <b>Checked on every commit.</b> The contract below is compared against real <code>git worktree add</code> across 28 repository fixtures and 41 argument shapes, on macOS, Linux (btrfs, XFS, ext4) and Windows (NTFS, ReFS), plus the Linux kernel on two filesystems. The suite proves itself by detecting 19 deliberately injected differences and finding none when git is compared against itself.
   </div>
 </div>
 
@@ -270,16 +270,16 @@ tr.is-headline th,tr.is-headline td{font-weight:700;color:var(--fg)}
 
     <div class="stat">
       <span class="stat__pair">
-        <span class="stat__value" id="stat-git"><!--bench:kernel.disk.git-->1814 MB<!--/bench--></span>
+        <span class="stat__value" id="stat-git"><!--bench:kernel.disk.git-->1816 MB<!--/bench--></span>
         <span class="stat__label">git worktree add</span>
       </span>
       <span class="stat__arrow" aria-hidden="true">→</span>
       <span class="stat__pair">
-        <span class="stat__value stat__value--sprout" id="stat-sprout"><!--bench:kernel.disk.sprout-->44 MB<!--/bench--></span>
+        <span class="stat__value stat__value--sprout" id="stat-sprout"><!--bench:kernel.disk.sprout-->36 MB<!--/bench--></span>
         <span class="stat__label">git sprout add</span>
       </span>
     </div>
-    <p class="stat__caption">Disk consumed by one worktree of the Linux kernel: <!--bench:kernel.files-->95 056<!--/bench--> files, <!--bench:kernel.bytes-->2.0 GB<!--/bench-->.</p>
+    <p class="stat__caption">Disk consumed by one worktree of the Linux kernel: <!--bench:kernel.files-->95 299<!--/bench--> files, <!--bench:kernel.bytes-->2.0 GB<!--/bench-->.</p>
   </div>
 </section>
 
@@ -298,31 +298,31 @@ tr.is-headline th,tr.is-headline td{font-weight:700;color:var(--fg)}
          width is its metric scaled against the larger of the two: the bigger bar is
          always 1000, the smaller is round(metric / larger * 1000, 2). Emit exactly:
            chart.bar.git     <rect class="bar" x="0" y="0" width="1000" height="24"/>
-           chart.bar.sprout  <rect class="bar bar--sprout" x="0" y="0" width="24.26" height="24"/>
+           chart.bar.sprout  <rect class="bar bar--sprout" x="0" y="0" width="19.82" height="24"/>
          The classes carry the colour and the reveal transform. Keep them. -->
     <figure class="bars reveal">
       <div class="bars__row">
-        <div class="bars__head"><span class="bars__name">git worktree add</span><span class="bars__figure"><!--bench:kernel.disk.git-->1814 MB<!--/bench--></span></div>
+        <div class="bars__head"><span class="bars__name">git worktree add</span><span class="bars__figure"><!--bench:kernel.disk.git-->1816 MB<!--/bench--></span></div>
         <svg class="bars__track" viewBox="0 0 1000 24" preserveAspectRatio="none" aria-hidden="true"><!--bench:chart.bar.git--><rect class="bar" x="0" y="0" width="1000" height="24"/><!--/bench--></svg>
       </div>
       <div class="bars__row">
-        <div class="bars__head"><span class="bars__name">git sprout add</span><span class="bars__figure bars__figure--sprout"><!--bench:kernel.disk.sprout-->44 MB<!--/bench--></span></div>
-        <svg class="bars__track" viewBox="0 0 1000 24" preserveAspectRatio="none" aria-hidden="true"><!--bench:chart.bar.sprout--><rect class="bar bar--sprout" x="0" y="0" width="24.26" height="24"/><!--/bench--></svg>
+        <div class="bars__head"><span class="bars__name">git sprout add</span><span class="bars__figure bars__figure--sprout"><!--bench:kernel.disk.sprout-->36 MB<!--/bench--></span></div>
+        <svg class="bars__track" viewBox="0 0 1000 24" preserveAspectRatio="none" aria-hidden="true"><!--bench:chart.bar.sprout--><rect class="bar bar--sprout" x="0" y="0" width="19.82" height="24"/><!--/bench--></svg>
       </div>
-      <figcaption class="bars__scale">Same scale, same axis. <!--bench:kernel.disk.ratio-->41x<!--/bench--> less disk. That is <!--bench:kernel.disk.saved-->1.73 GB<!--/bench--> that never gets allocated, every time anyone creates a worktree.</figcaption>
+      <figcaption class="bars__scale">Same scale, same axis. <!--bench:kernel.disk.ratio-->50x<!--/bench--> less disk. That is <!--bench:kernel.disk.saved-->1.78 GB<!--/bench--> that never gets allocated, every time anyone creates a worktree.</figcaption>
     </figure>
 
     <div class="table-wrap reveal">
       <table class="table-collapse">
-        <caption>Wall clock and disk consumed, per worktree. The kernel row is the one that matters at scale.</caption>
+        <caption>Disk consumed, per worktree. The kernel row is the one that matters at scale.</caption>
         <thead>
           <tr><th scope="col">Workload</th><th scope="col">git worktree add</th><th scope="col">git sprout add</th></tr>
         </thead>
         <tbody>
           <tr class="is-headline">
-            <th scope="row">Linux kernel, <!--bench:kernel.files-->95 056<!--/bench--> files, <!--bench:kernel.bytes-->2.0 GB<!--/bench--></th>
-            <td data-label="git worktree add"><span><!--bench:kernel.time.git-->11.06s<!--/bench--> · <!--bench:kernel.disk.git-->1814 MB<!--/bench--></span></td>
-            <td data-label="git sprout add" class="col-sprout"><span><!--bench:kernel.time.sprout-->11.51s<!--/bench--> · <!--bench:kernel.disk.sprout-->44 MB<!--/bench--></span></td>
+            <th scope="row">Linux kernel, <!--bench:kernel.files-->95 299<!--/bench--> files, <!--bench:kernel.bytes-->2.0 GB<!--/bench--></th>
+            <td data-label="git worktree add"><span><!--bench:kernel.disk.git-->1816 MB<!--/bench--></span></td>
+            <td data-label="git sprout add" class="col-sprout"><span><!--bench:kernel.disk.sprout-->36 MB<!--/bench--></span></td>
           </tr>
           <tr>
             <th scope="row">250 MB, 2000 files</th>

@@ -21,11 +21,13 @@
 ---
 
 > [!NOTE]
-> **Verified on macOS.** The compatibility contract below is checked against real
-> `git worktree add` by a differential suite that passes 28 repository fixtures and the
-> Linux kernel, and that proves itself by detecting nineteen injected differences. The
-> Linux and Windows suites have not run yet, and the smaller benchmark rows are still
-> the research prototype's rather than this implementation's.
+> **Checked on every commit.** The contract below is compared against real
+> `git worktree add` across 28 repository fixtures and 41 argument shapes, on macOS,
+> Linux (btrfs, XFS, ext4) and Windows (NTFS, ReFS), plus the Linux kernel on two
+> filesystems. The suite proves itself by detecting nineteen deliberately injected
+> differences and finding none when git is compared against itself. The kernel figures
+> are measured on the released binary; the smaller benchmark rows are still the
+> research prototype's.
 
 ## Get Started
 
