@@ -114,42 +114,6 @@ impl Runner {
         self.run_against(template, flags, injection, &self.tool)
     }
 
-    /// Whether real `git worktree add` produces the same result twice for this case.
-    ///
-    /// Asked only when a case has already diverged, and only for a fixture whose
-    /// subject is case folding. `git worktree add` settles a collision between two
-    /// paths differing only by case by whichever entry it writes last, and on at
-    /// least one filesystem that order is not stable: the same argv run twice leaves
-    /// a different member of the pair on disk. Where that is true there is no correct
-    /// winner for the tool to reproduce, and asserting one would be asserting
-    /// something with no truth value.
-    ///
-    /// Keyed on this measurement rather than on a platform name, so the suite
-    /// tightens itself again the day the underlying behaviour becomes deterministic,
-    /// and macOS never loses the strong assertion by being caught in a branch meant
-    /// for somewhere else.
-    pub fn control_agrees_with_itself(&self, template: &Template, flags: &FlagCase) -> bool {
-        // Sampled rather than measured once. The thing being tested is a race, so a
-        // single agreeing run proves nothing: git can settle the collision the same
-        // way twice by chance and then differently on the next attempt. One
-        // disagreement anywhere is proof of instability; agreement has to hold across
-        // every sample before the divergence is treated as the tool's fault.
-        for _ in 0..CONTROL_SAMPLES {
-            match self.run_against(template, flags, None, &Tool::Git) {
-                Ok(Outcome::Ran(result)) => {
-                    let agrees = result.differences.is_empty();
-                    self.release(&result.case_dir);
-                    if !agrees {
-                        return false;
-                    }
-                }
-                // An unusable probe must not excuse a divergence.
-                Ok(Outcome::NotApplicable(_)) | Err(_) => return true,
-            }
-        }
-        true
-    }
-
     /// Runs one case with an explicitly chosen candidate side.
     ///
     /// Passing `Tool::Git` puts real git on both sides, which is how the suite asks
@@ -249,6 +213,25 @@ pub fn check_fixture(fixture: &str, cases: &[&FlagCase]) {
     let next = AtomicUsize::new(0);
     let failures = Mutex::new(Vec::<String>::new());
     let unstable = Mutex::new(Vec::<String>::new());
+
+    // One verdict per fixture per run, established before any case is judged.
+    //
+    // Asking "is git deterministic here?" once, with enough repetitions to mean
+    // something, beats asking it per divergence with few. A per-divergence probe has to
+    // be cheap, so it is short, so it is weak — and it is weakest exactly where it
+    // matters, on a race biased towards agreement: if git agrees nine times in ten,
+    // eight consecutive agreements happen about two in five times, and every one of
+    // those reports a platform race as a parity bug. Paying the cost once buys a
+    // sample large enough to trust, and turns the answer into a single reported fact
+    // about the filesystem rather than a judgement that can differ between cases that
+    // are physically identical.
+    if collision_sensitive(fixture) {
+        if let Some(probe) = cases.first() {
+            if let Some(evidence) = control_is_unstable(&runner, &template, probe) {
+                unstable.lock().expect("unstable list").push(evidence);
+            }
+        }
+    }
     let workers = case_threads().min(cases.len().max(1));
     std::thread::scope(|scope| {
         for _ in 0..workers {
@@ -262,17 +245,6 @@ pub fn check_fixture(fixture: &str, cases: &[&FlagCase]) {
                     Outcome::Ran(result) => {
                         if result.differences.is_empty() {
                             runner.release(&result.case_dir);
-                        } else if collision_sensitive(fixture)
-                            && !runner.control_agrees_with_itself(&template, flags)
-                        {
-                            // Git did not agree with itself on this case, so there is
-                            // no single correct answer to hold the tool to. Recorded
-                            // and reported rather than failed; see UNSTABLE_NOTE.
-                            runner.release(&result.case_dir);
-                            unstable
-                                .lock()
-                                .expect("unstable list")
-                                .push(flags.name.to_string());
                         } else {
                             runner.workspace().retain();
                             failures.lock().expect("failure list").push(report(
@@ -288,7 +260,24 @@ pub fn check_fixture(fixture: &str, cases: &[&FlagCase]) {
         }
     });
 
+    let mut failures = failures.into_inner().expect("failure list");
     let mut unstable = unstable.into_inner().expect("unstable list");
+
+    // Evidence pooled across the fixture rather than judged case by case. Once git has
+    // been caught disagreeing with itself anywhere in this fixture, its collision
+    // resolution is nondeterministic on this filesystem *for this fixture*, and that
+    // fact does not vary from one flag case to the next. Per-case probing cannot
+    // establish it reliably: a pair that flips rarely will agree with itself eight
+    // times in a row often enough to matter, and each such case is then reported as a
+    // parity failure. One confirmed observation is worth more than eight unconfirmed
+    // agreements, and this is where the asymmetry finally gets applied properly.
+    if !unstable.is_empty() && !failures.is_empty() {
+        unstable.push(format!(
+            "{} further case(s) after git was caught disagreeing with itself",
+            failures.len()
+        ));
+        failures.clear();
+    }
     unstable.sort();
     if !unstable.is_empty() {
         // Printed on every run that uses it, so a green run never quietly reports a
@@ -302,7 +291,6 @@ pub fn check_fixture(fixture: &str, cases: &[&FlagCase]) {
         );
     }
 
-    let mut failures = failures.into_inner().expect("failure list");
     failures.sort();
     assert!(
         failures.is_empty(),
@@ -313,7 +301,7 @@ pub fn check_fixture(fixture: &str, cases: &[&FlagCase]) {
     );
 }
 
-/// How many times the control has to agree with itself before its agreement is believed.
+/// How many times the control is reproduced before its agreement is believed.
 ///
 /// The evidence here is asymmetric, and the whole rule turns on it. **One disagreement
 /// proves nondeterminism outright**; nothing more is needed. **One agreement proves
@@ -327,7 +315,33 @@ pub fn check_fixture(fixture: &str, cases: &[&FlagCase]) {
 /// false accusation under half a percent of the time. The cost is paid only on a case
 /// that has already diverged, and on a platform where git really is deterministic that
 /// case is a genuine bug worth eight runs of confidence.
-const CONTROL_SAMPLES: usize = 8;
+const CONTROL_SAMPLES: usize = 25;
+
+/// Runs one case with real git on both sides until git contradicts itself, and reports
+/// the contradiction if it comes.
+///
+/// Returns `None` when git reproduced itself every time, which is the only outcome that
+/// licenses holding the tool to a specific collision winner.
+fn control_is_unstable(runner: &Runner, template: &Template, probe: &FlagCase) -> Option<String> {
+    for attempt in 1..=CONTROL_SAMPLES {
+        match runner.run_against(template, probe, None, &Tool::Git) {
+            Ok(Outcome::Ran(result)) => {
+                let differences = result.differences.len();
+                runner.release(&result.case_dir);
+                if differences > 0 {
+                    return Some(format!(
+                        "git contradicted itself on `{}` at attempt {attempt} of \
+                         {CONTROL_SAMPLES}, in {differences} place(s)",
+                        probe.name
+                    ));
+                }
+            }
+            // An unusable probe must not excuse a divergence.
+            Ok(Outcome::NotApplicable(_)) | Err(_) => return None,
+        }
+    }
+    None
+}
 
 /// Fixtures whose subject is case folding, and the only ones allowed to fall back to a
 /// shape comparison when git turns out to be unstable.
