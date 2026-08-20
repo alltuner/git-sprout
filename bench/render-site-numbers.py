@@ -16,7 +16,7 @@ from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_REPORT = REPO_ROOT / "bench" / "results.json"
-TARGETS: list[str] = ["docs/index.html", "docs/details.html", "README.md"]
+TARGETS: list[str] = ["docs/index.html", "README.md"]
 
 # Figures the report produces and no surface publishes, on purpose.
 #
