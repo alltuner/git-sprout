@@ -149,7 +149,7 @@ svg{display:block;max-width:100%}
 .chart-anim.is-visible .bar{transform:scaleX(1);transition:transform 180ms var(--ease)}
 
 /* Table */
-.table-wrap{margin:3rem 0 0}
+.table-wrap{margin:3rem 0 0;overflow-x:auto}
 table{width:100%;border-collapse:collapse;font-size:.88rem}
 caption{text-align:left;font-size:.8rem;color:var(--fg-muted);margin-bottom:.75rem}
 th,td{text-align:left;padding:.7rem .6rem;border-bottom:1px solid var(--fg-faint);vertical-align:top}
@@ -176,7 +176,12 @@ tr.is-headline th,tr.is-headline td{font-weight:700;color:var(--fg)}
 /* Code blocks */
 .block{margin:1.25rem 0 0;padding:1rem 1.1rem;background:var(--bg-surface);border:1px solid var(--fg-faint);border-radius:var(--radius-md)}
 .block__label{font-family:var(--font-mono);font-size:.72rem;color:var(--fg-muted);margin:0 0 .6rem}
-.copy-row{display:flex;align-items:stretch;border:1px solid var(--fg-faint);background:var(--bg-surface);border-radius:var(--radius-md);overflow:hidden;max-width:100%;width:fit-content}
+.block{position:relative}
+  .block > button[data-copy]{position:absolute;top:.4rem;right:.4rem;padding:.35rem;min-width:44px;min-height:44px;display:flex;align-items:center;justify-content:center;background:transparent;border:1px solid var(--fg-faint);border-radius:6px;color:var(--fg-muted);cursor:pointer}
+  .block > button[data-copy]:hover,.block > button[data-copy]:focus-visible{color:var(--fg);border-color:var(--fg-muted)}
+  .block > button[data-copy] svg{width:16px;height:16px}
+  .block > button[data-copy].is-copied{color:var(--accent);border-color:var(--accent)}
+  .copy-row{display:flex;align-items:stretch;border:1px solid var(--fg-faint);background:var(--bg-surface);border-radius:var(--radius-md);overflow:hidden;max-width:100%;width:fit-content}
 .copy-row code{background:none;padding:.85rem 1rem;font-size:.9rem;color:var(--fg);user-select:all;white-space:nowrap;overflow-x:auto}
 .copy-row button{min-width:44px;min-height:44px;display:inline-flex;align-items:center;justify-content:center;border:0;border-left:1px solid var(--fg-faint);background:none;color:var(--fg-muted);cursor:pointer}
 .copy-row button:hover{background:var(--fg-faint);color:var(--fg)}
@@ -201,7 +206,7 @@ tr.is-headline th,tr.is-headline td{font-weight:700;color:var(--fg)}
   .hero{padding:5rem 0 4rem}
   .site-footer__row{flex-direction:row;justify-content:space-between;text-align:left}
 }
-@media (max-width:719px){
+@media (max-width:959px){
   .table-collapse thead{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
   .table-collapse tr{display:block;padding:.9rem 0;border-bottom:1px solid var(--fg-faint)}
   .table-collapse th,.table-collapse td{display:block;border:0;padding:0}
@@ -427,7 +432,8 @@ tr.is-headline th,tr.is-headline td{font-weight:700;color:var(--fg)}
 
       <div class="block">
         <p class="block__label">What a harness runs, verbatim</p>
-<pre><code>git -c core.fsmonitor= worktree add --no-track -B &lt;branch&gt; &lt;path&gt; &lt;sha&gt;</code></pre>
+        <button type="button" data-copy="#snippet-1" aria-label="Copy the What a harness runs verbatim snippet"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>
+        <pre><code id="snippet-1">git -c core.fsmonitor= worktree add --no-track -B &lt;branch&gt; &lt;path&gt; &lt;sha&gt;</code></pre>
       </div>
 
       <p class="note" style="margin-top:1.5rem">That changes the shape of the disk math. One engineer running several agents in parallel on a monorepo allocates a fresh <!--bench:kernel.disk.git.round-->1.8 GB<!--/bench--> per agent per task, and those worktrees are created and destroyed all day. On a CI or agent fleet it stops being a laptop annoyance and becomes a provisioning line item.</p>
@@ -458,7 +464,8 @@ tr.is-headline th,tr.is-headline td{font-weight:700;color:var(--fg)}
 
       <div class="block">
         <p class="block__label">Usage</p>
-<pre><code>git sprout add ../myrepo-feature -b feature     # or: git worktree-fast add</code></pre>
+        <button type="button" data-copy="#snippet-2" aria-label="Copy the Usage snippet"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>
+        <pre><code id="snippet-2">git sprout add ../myrepo-feature -b feature     # or: git worktree-fast add</code></pre>
       </div>
 
       <p class="note" style="margin-top:1.5rem">Two things have to be true. The filesystem needs block cloning: <strong>APFS</strong> on macOS; <strong>btrfs, XFS with reflinks, or bcachefs</strong> on Linux; <strong>a ReFS volume or a Windows 11 Dev Drive</strong> on Windows. Everywhere else, ext4 and NTFS included, it runs plain <code>git worktree add</code>.</p>
@@ -484,7 +491,8 @@ tr.is-headline th,tr.is-headline td{font-weight:700;color:var(--fg)}
 
       <div class="block">
         <p class="block__label">bash / zsh — ~/.bashrc, ~/.zshrc</p>
-<pre><code>git() {
+        <button type="button" data-copy="#snippet-3" aria-label="Copy the bash / zsh — /.bashrc /.zshrc snippet"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>
+        <pre><code id="snippet-3">git() {
   if [ "${1:-}" = worktree ] &amp;&amp; [ "${2:-}" = add ]; then
     shift 2
     command git sprout add "$@"
@@ -496,7 +504,8 @@ tr.is-headline th,tr.is-headline td{font-weight:700;color:var(--fg)}
 
       <div class="block">
         <p class="block__label">fish — ~/.config/fish/config.fish</p>
-<pre><code>function git
+        <button type="button" data-copy="#snippet-4" aria-label="Copy the fish — /.config/fish/config.fish snippet"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>
+        <pre><code id="snippet-4">function git
     if test (count $argv) -ge 2; and test "$argv[1]" = worktree; and test "$argv[2]" = add
         command git sprout add $argv[3..]
     else
@@ -507,7 +516,8 @@ end</code></pre>
 
       <div class="block">
         <p class="block__label">PowerShell — $PROFILE</p>
-<pre><code>function git {
+        <button type="button" data-copy="#snippet-5" aria-label="Copy the PowerShell — PROFILE snippet"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>
+        <pre><code id="snippet-5">function git {
     $real = (Get-Command git -CommandType Application | Select-Object -First 1).Source
     if ($args.Count -ge 2 -and $args[0] -eq 'worktree' -and $args[1] -eq 'add') {
         $rest = @($args | Select-Object -Skip 2)
@@ -520,7 +530,8 @@ end</code></pre>
 
       <div class="block">
         <p class="block__label">nushell — $nu.config-path</p>
-<pre><code>def --wrapped git [...args] {
+        <button type="button" data-copy="#snippet-6" aria-label="Copy the nushell — nu.config-path snippet"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>
+        <pre><code id="snippet-6">def --wrapped git [...args] {
     if ($args | length) >= 2 and $args.0 == "worktree" and $args.1 == "add" {
         ^git sprout add ...($args | skip 2)
     } else {
@@ -605,7 +616,11 @@ git sprout uninstall-shim    # removes it</code></pre>
   Array.prototype.forEach.call(document.querySelectorAll("[data-copy]"), function (btn) {
     btn.addEventListener("click", function () {
       var text = document.querySelector(btn.getAttribute("data-copy")).textContent;
-      if (navigator.clipboard) navigator.clipboard.writeText(text);
+      if (!navigator.clipboard) return;
+      navigator.clipboard.writeText(text).then(function () {
+        btn.classList.add("is-copied");
+        setTimeout(function () { btn.classList.remove("is-copied"); }, 1200);
+      });
     });
   });
 

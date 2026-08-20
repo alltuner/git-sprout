@@ -69,14 +69,14 @@ bytes.
 
 | workload | `git worktree add` | `git sprout add` |
 | --- | --- | --- |
-| **Linux kernel, <!--bench:kernel.files-->95 056<!--/bench--> files, <!--bench:kernel.bytes-->2.0 GB<!--/bench-->** | **<!--bench:kernel.time.git-->11.06s<!--/bench--> · <!--bench:kernel.disk.git-->1814 MB<!--/bench-->** | **<!--bench:kernel.time.sprout-->11.51s<!--/bench--> · <!--bench:kernel.disk.sprout-->44 MB<!--/bench-->** |
+| **Linux kernel, <!--bench:kernel.files-->95 299<!--/bench--> files, <!--bench:kernel.bytes-->2.0 GB<!--/bench-->** | **<!--bench:kernel.disk.git-->1816 MB<!--/bench-->** | **<!--bench:kernel.disk.sprout-->36 MB<!--/bench-->** |
 | 250 MB, 2000 files | <!--bench:medium.time.git-->0.85s<!--/bench--> · <!--bench:medium.disk.git-->251 MB<!--/bench--> | <!--bench:medium.time.sprout-->0.21s<!--/bench--> · <!--bench:medium.disk.sprout-->~0 MB<!--/bench--> |
 | 188 MB, 3000 files, source 6 commits behind | <!--bench:cross.time.git-->0.83s<!--/bench--> · <!--bench:cross.disk.git-->187 MB<!--/bench--> | <!--bench:cross.time.sprout-->0.15s<!--/bench--> · <!--bench:cross.disk.sprout-->~1.5 MB<!--/bench--> |
 | btrfs, 188 MB | <!--bench:btrfs.time.git-->0.33s<!--/bench--> · <!--bench:btrfs.disk.git-->187 MB<!--/bench--> | <!--bench:btrfs.time.sprout-->0.05s<!--/bench--> · <!--bench:btrfs.disk.sprout-->0.1 MB<!--/bench--> |
 | ext4 (no block cloning) | <!--bench:ext4.time.git-->0.41s<!--/bench--> · <!--bench:ext4.disk.git-->187 MB<!--/bench--> | falls back, identical |
 
-One worktree of the Linux kernel: <!--bench:kernel.disk.ratio-->41x<!--/bench--> less disk, and
-no meaningful difference in wall clock. That is <!--bench:kernel.disk.saved-->1.73 GB<!--/bench--> that never gets allocated every
+One worktree of the Linux kernel: <!--bench:kernel.disk.ratio-->50x<!--/bench--> less disk, and
+no meaningful difference in wall clock. That is <!--bench:kernel.disk.saved-->1.78 GB<!--/bench--> that never gets allocated every
 time anyone creates one. Ten engineers with five worktrees each is
 <!--bench:fleet.disk.git-->90 GB<!--/bench--> of kernel checkouts on git, and about
 <!--bench:fleet.disk.sprout-->2 GB<!--/bench--> on sprout.
