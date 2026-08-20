@@ -99,9 +99,6 @@ svg{display:block;max-width:100%}
 .nav-link svg{width:1rem;height:1rem}
 
 /* Status strip — remove at M4, see the note in the Compatibility section. */
-.status{background:var(--bg-elevated);border-bottom:1px solid var(--fg-faint);font-size:.8rem;color:var(--fg-dim)}
-.status .container{padding-top:.6rem;padding-bottom:.6rem}
-.status b{font-family:var(--font-mono);font-weight:400;color:var(--fg)}
 
 /* Buttons */
 .btn{display:inline-flex;align-items:center;justify-content:center;gap:.5rem;padding:.7rem 1.15rem;min-height:44px;border-radius:var(--radius-md);font-family:var(--font-mono);font-size:.85rem;border:1px solid transparent;background:none;cursor:pointer;transition:background 150ms var(--ease),color 150ms var(--ease),border-color 150ms var(--ease)}
@@ -119,8 +116,9 @@ svg{display:block;max-width:100%}
 .hero__glow{position:absolute;top:-40%;right:-25%;width:70%;height:120%;border-radius:50%;background:radial-gradient(ellipse,var(--wine-glow) 0,transparent 70%);pointer-events:none}
 .hero__pill{display:inline-flex;align-items:center;gap:.5rem;padding:.3rem .85rem;border-radius:999px;border:1px solid var(--fg-faint);font-family:var(--font-mono);font-size:.72rem;color:var(--fg-muted);margin:0 0 1.25rem}
 .hero__pill code{background:none;padding:0;color:var(--fg-dim)}
-.hero__title{font-size:clamp(2.1rem,6.2vw,4rem);line-height:1.04;letter-spacing:-.03em;margin:0 0 1.1rem}
-.hero__title-accent{color:var(--accent)}
+.hero__title{font-size:clamp(2.1rem,6.2vw,4rem);line-height:1.04;letter-spacing:-.03em;margin:0 0 1.1rem;text-wrap:balance}
+/* Keeps "second copy." whole, so the line breaks before it rather than through it. */
+.hero__title-accent{color:var(--accent);white-space:nowrap}
 .hero__lead{font-size:1.05rem;color:var(--fg-muted);max-width:56ch;margin-bottom:1.75rem}
 .hero__actions{display:flex;flex-wrap:wrap;gap:.75rem}
 
@@ -259,11 +257,6 @@ tr.is-headline th,tr.is-headline td{font-weight:700;color:var(--fg)}
   </div>
 </header>
 
-<div class="status">
-  <div class="container">
-    <b>Checked on every commit.</b> The contract below is compared against real <code>git worktree add</code> across 28 repository fixtures and 41 argument shapes, on macOS, Linux (btrfs, XFS, ext4) and Windows (NTFS, ReFS), plus the Linux kernel on two filesystems. The suite proves itself by detecting 19 deliberately injected differences and finding none when git is compared against itself.
-  </div>
-</div>
 
 <main>
 
@@ -272,7 +265,7 @@ tr.is-headline th,tr.is-headline td{font-weight:700;color:var(--fg)}
   <div class="container">
     <p class="hero__pill">A drop-in <code>git worktree add</code></p>
 
-    <h1 class="hero__title">Git worktrees without the <span class="hero__title-accent">second copy</span>.</h1>
+    <h1 class="hero__title">Git worktrees without the <span class="hero__title-accent">second copy.</span></h1>
 
     <p class="hero__lead">Same command. Same result. None of the bytes.</p>
 
@@ -396,7 +389,7 @@ tr.is-headline th,tr.is-headline td{font-weight:700;color:var(--fg)}
     <div class="reveal">
       <p class="eyebrow">Compatibility</p>
       <h2 class="section-title">Indistinguishable from git, and specific about where it is not.</h2>
-      <p class="lead">Every item below is checked on every run of the differential suite, which performs each operation twice &mdash; once through real <code>git worktree add</code>, once through git-sprout &mdash; and compares the results. The suite earns its authority by detecting nineteen deliberately injected differences, and by finding nothing when git is compared against itself.</p>
+      <p class="lead">Every item below is checked on every commit, by a suite that performs each operation twice &mdash; once through real <code>git worktree add</code>, once through git-sprout &mdash; and compares the results. It runs 28 repository fixtures across 41 argument shapes on macOS, Linux (btrfs, XFS, ext4) and Windows (NTFS, ReFS), plus the Linux kernel on two filesystems, and earns its authority by detecting 19 deliberately injected differences and finding none when git is compared against itself.</p>
     </div>
 
     <ul class="checks reveal">
