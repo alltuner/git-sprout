@@ -6,9 +6,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 
-<title>git-sprout — git worktree add without copying your tree</title>
+<title>git-sprout — how it works, and what it promises</title>
 <meta name="description" content="Every git worktree is a second full copy of your tree on disk. git-sprout is a drop-in git worktree add that shares disk blocks instead. Same command, same result, a fraction of the space.">
-<link rel="canonical" href="https://sprout.alltuner.com/">
+<link rel="canonical" href="https://sprout.alltuner.com/details.html">
 
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://sprout.alltuner.com/">
@@ -251,7 +251,7 @@ tr.is-headline th,tr.is-headline td{font-weight:700;color:var(--fg)}
       git-sprout
     </a>
     <ul class="site-nav">
-      <li><a class="nav-link" href="/details.html" data-optional>How it works</a></li>
+      <li><a class="nav-link" href="#numbers" data-optional>Numbers</a></li>
       <li><a class="nav-link" href="#install">Install</a></li>
       <li><a class="nav-link" href="https://github.com/alltuner/git-sprout" aria-label="GitHub repository">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/></svg>
@@ -267,47 +267,151 @@ tr.is-headline th,tr.is-headline td{font-weight:700;color:var(--fg)}
 
 
 <main>
-<section class="hero">
-  <div class="hero__glow"></div>
+<div class="container" style="padding-top:2.5rem">
+  <p class="eyebrow"><a href="/" style="color:inherit">&larr; git-sprout</a></p>
+  <h1 class="section-title" style="margin-top:.6rem">How it works, and what it promises.</h1>
+  <p class="lead" style="margin-top:1rem;max-width:62ch">The numbers, the mechanism, and every place the promise stops. The <a href="/">front page</a> is the short version.</p>
+</div>
+<div class="divider"></div>
+
+<section id="numbers" class="section">
   <div class="container">
-    <p class="hero__pill">A drop-in <code>git worktree add</code></p>
-
-    <h1 class="hero__title">Git worktrees without the <span class="hero__title-accent">second copy.</span></h1>
-
-    <p class="hero__lead">Same command. Same result. None of the bytes.</p>
-
-    <div class="hero__actions">
-      <a class="btn btn-primary" href="#install">Install</a>
-      <a class="btn btn-ghost" href="https://github.com/alltuner/git-sprout">View source</a>
+    <div class="reveal">
+      <p class="eyebrow">The numbers</p>
+      <h2 class="section-title">What one worktree of the Linux kernel costs.</h2>
+      <p class="lead">The same repository, the same command, run twice. The only thing that changes is how much disk the filesystem has to hand out.</p>
     </div>
-  </div>
-</section>
 
-<section class="showcase">
-  <div class="container">
-    <figure class="bars bars--hero">
-      <div class="bars__row">
-        <div class="bars__head"><span class="bars__name">git worktree add</span><span class="bars__figure"><!--bench:kernel.disk.git-->1816 MB<!--/bench--></span></div>
-        <svg class="bars__track" viewBox="0 0 1000 24" preserveAspectRatio="none" aria-hidden="true"><!--bench:chart.bar.git--><rect class="bar" x="0" y="0" width="1000" height="24"/><!--/bench--></svg>
-      </div>
-      <div class="bars__row">
-        <div class="bars__head"><span class="bars__name">git sprout add</span><span class="bars__figure bars__figure--sprout"><!--bench:kernel.disk.sprout-->36 MB<!--/bench--></span></div>
-        <svg class="bars__track" viewBox="0 0 1000 24" preserveAspectRatio="none" aria-hidden="true"><!--bench:chart.bar.sprout--><rect class="bar bar--sprout" x="0" y="0" width="19.82" height="24"/><!--/bench--></svg>
-      </div>
-      <figcaption class="bars__scale">One worktree of the Linux kernel &mdash; <!--bench:kernel.files-->95 299<!--/bench--> files, <!--bench:kernel.bytes-->2.0 GB<!--/bench-->. The new worktree shares its blocks with a checkout you already have, until something writes to them.</figcaption>
-    </figure>
+    <!-- The bars are a figure like any other, so they carry bench markers too. Each
+         marked <rect> is replaced whole. The viewBox is fixed at 0 0 1000 24, so a
+         width is its metric scaled against the larger of the two: the bigger bar is
+         always 1000, the smaller is round(metric / larger * 1000, 2). Emit exactly:
+           chart.bar.git     <rect class="bar" x="0" y="0" width="1000" height="24"/>
+           chart.bar.sprout  <rect class="bar bar--sprout" x="0" y="0" width="19.82" height="24"/>
+         The classes carry the colour and the reveal transform. Keep them. -->
+    <div class="table-wrap reveal">
+      <table class="table-collapse">
+        <caption>Disk consumed, per worktree. The kernel row is the one that matters at scale.</caption>
+        <thead>
+          <tr><th scope="col">Workload</th><th scope="col">git worktree add</th><th scope="col">git sprout add</th></tr>
+        </thead>
+        <tbody>
+          <tr class="is-headline">
+            <th scope="row">Linux kernel, <!--bench:kernel.files-->95 299<!--/bench--> files, <!--bench:kernel.bytes-->2.0 GB<!--/bench--></th>
+            <td data-label="git worktree add"><span><!--bench:kernel.disk.git-->1816 MB<!--/bench--></span></td>
+            <td data-label="git sprout add" class="col-sprout"><span><!--bench:kernel.disk.sprout-->36 MB<!--/bench--></span></td>
+          </tr>
+          <tr>
+            <th scope="row">250 MB, 2000 files</th>
+            <td data-label="git worktree add"><span><!--bench:medium.time.git-->0.85s<!--/bench--> · <!--bench:medium.disk.git-->251 MB<!--/bench--></span></td>
+            <td data-label="git sprout add" class="col-sprout"><span><!--bench:medium.time.sprout-->0.21s<!--/bench--> · <!--bench:medium.disk.sprout-->~0 MB<!--/bench--></span></td>
+          </tr>
+          <tr>
+            <th scope="row">188 MB, 3000 files, source 6 commits behind</th>
+            <td data-label="git worktree add"><span><!--bench:cross.time.git-->0.83s<!--/bench--> · <!--bench:cross.disk.git-->187 MB<!--/bench--></span></td>
+            <td data-label="git sprout add" class="col-sprout"><span><!--bench:cross.time.sprout-->0.15s<!--/bench--> · <!--bench:cross.disk.sprout-->~1.5 MB<!--/bench--></span></td>
+          </tr>
+          <tr>
+            <th scope="row">btrfs, 188 MB</th>
+            <td data-label="git worktree add"><span><!--bench:btrfs.time.git-->0.33s<!--/bench--> · <!--bench:btrfs.disk.git-->187 MB<!--/bench--></span></td>
+            <td data-label="git sprout add" class="col-sprout"><span><!--bench:btrfs.time.sprout-->0.05s<!--/bench--> · <!--bench:btrfs.disk.sprout-->0.1 MB<!--/bench--></span></td>
+          </tr>
+          <tr>
+            <th scope="row">ext4 (no block cloning)</th>
+            <td data-label="git worktree add"><span><!--bench:ext4.time.git-->0.41s<!--/bench--> · <!--bench:ext4.disk.git-->187 MB<!--/bench--></span></td>
+            <td data-label="git sprout add"><span>falls back, identical</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p class="note reveal" style="margin-top:1.75rem">Five worktrees each across a team of ten is <!--bench:fleet.disk.git-->90 GB<!--/bench--> of kernel checkouts today, and about <!--bench:fleet.disk.sprout-->2 GB<!--/bench--> after.</p>
+
+    <p class="note reveal">This will not make your worktrees faster. On a small repository it saves well under a second, and on the kernel the two commands finish within half a second of each other. Cloning in parallel is future work. Install it for the disk column, which holds at every size &mdash; what it costs you scales with how many files you have, not how big they are.</p>
+
+    <div class="proof reveal">
+      <p class="proof__label">The filesystem's own accounting: <code>btrfs filesystem du</code>, verbatim</p>
+<pre><code><!--bench:btrfs.du-->       Total   Exclusive  Set shared  Filename
+   187.00MiB       0.00B   187.00MiB  repo/src        <- source
+   187.00MiB       0.00B   187.00MiB  wt-sprout/src   <- git sprout add
+   187.00MiB   187.00MiB       0.00B  wt-plain/src    <- git worktree add<!--/bench--></code></pre>
+    </div>
+
+    <p class="note reveal" style="margin-top:1.5rem">Provisional figures. The kernel row is measured on the implementation itself, on a dedicated APFS image so nothing else on the machine could contaminate it; the smaller rows are still the research prototype's. Machine: <!--bench:env.macos-->Apple M2, 8 cores, macOS 26.6.1, git 2.55.0<!--/bench-->; Linux figures on <!--bench:env.linux-->kernel 7.0.12, git 2.47.3, loopback btrfs and XFS<!--/bench-->. They are re-measured by the benchmark harness in the repository and replaced here at release; <a href="https://github.com/alltuner/git-sprout/tree/main/bench">the harness and its raw output</a> are in the repo.</p>
   </div>
 </section>
 
 <div class="divider"></div>
 
-<section class="section section--tight">
+<section id="how" class="section">
   <div class="container">
-    <ul class="props">
-      <li><h3>It is the same command</h3><p>Every flag <code>git worktree add</code> takes, the same output, the same hooks, the same index. If you can tell the difference, that is a bug.</p></li>
-      <li><h3>The files are shared, not copied</h3><p>Your new worktree points at the blocks a checkout you already have is using. Edit either one and only the changed blocks start costing anything.</p></li>
-      <li><h3>Nothing to configure</h3><p>No plugin, no integration, no change to your repository. On a filesystem that cannot share blocks it quietly runs <code>git worktree add</code>.</p></li>
+    <div class="reveal">
+      <p class="eyebrow">How it works</p>
+      <h2 class="section-title">Where your new worktree gets its files.</h2>
+      <p class="lead">Four steps. Git still performs the ones that decide what ends up in your worktree.</p>
+    </div>
+
+    <ol class="steps reveal">
+      <li>Git creates the worktree, empty.</li>
+      <li>Every file that is identical in a checkout you already have is cloned by the filesystem into a new file that shares the same disk blocks until something writes to it.</li>
+      <li>A file is only cloned when git itself already considers the original unmodified and knows it holds exactly the content the new worktree needs. Anything git is not certain about is left alone.</li>
+      <li>Git checks out the rest and writes the index. <strong>Git decides what the worktree contains; the clone only decides how the bytes got there.</strong></li>
+    </ol>
+
+    <p class="note reveal">The two files share disk blocks until one of them changes. Editing either leaves the other untouched, and only the changed blocks start costing space.</p>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<section id="compatibility" class="section">
+  <div class="container">
+    <div class="reveal">
+      <p class="eyebrow">Compatibility</p>
+      <h2 class="section-title">You should not be able to tell the difference.</h2>
+      <p class="lead">Every item below is checked on every commit, by a suite that performs each operation twice &mdash; once through real <code>git worktree add</code>, once through git-sprout &mdash; and compares the results. It runs 28 repository fixtures across 41 argument shapes on macOS, Linux (btrfs, XFS, ext4) and Windows (NTFS, ReFS), plus the Linux kernel on two filesystems, and earns its authority by detecting 19 deliberately injected differences and finding none when git is compared against itself.</p>
+    </div>
+
+    <ul class="checks reveal">
+      <li>Same flags, same stdout, same exit codes. Same stderr too, apart from the progress meter noted below.</li>
+      <li>Same hooks, in the same order, with the same arguments.</li>
+      <li>Same files, same modes, same index, compared byte for byte against real <code>git worktree add</code> across a matrix that includes <code>eol</code> conversion, <code>ident</code>, custom filters, LFS, submodules, sparse checkout, split index, SHA-256 repositories and case-insensitive filesystems, where the correct answer is the same set of already-modified paths git itself leaves behind rather than a clean worktree.</li>
+      <li>Untracked and ignored files are not copied, exactly as git does not copy them.</li>
+      <li><strong>Your repository's configuration is never modified.</strong></li>
+      <li>On a filesystem without block cloning, or in a repository that converts files on checkout, it simply runs <code>git worktree add</code>.</li>
+      <li>Any flag or combination it does not fully understand is not an error. It hands the whole command to git and exits with git's status.</li>
     </ul>
+
+    <p class="note reveal">Two differences you can observe, both deliberate. Files that were cloned keep the timestamp they had in the checkout they came from, rather than the moment the worktree was created. Nothing git does depends on it, but <code>make</code> and anything else that reads modification times can see it.</p>
+
+    <p class="note reveal">And on a big repository <code>git worktree add</code> prints a progress meter while it writes the files out. sprout has almost no files left to write, so git never starts one: you see less output because less happened.</p>
+
+    <p class="note reveal">Beyond those two, and beyond time and disk, anything you can tell apart is a bug &mdash; and <a href="https://github.com/alltuner/git-sprout/tree/main/tests/differential">this is the suite meant to catch it before you do</a>.</p>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<section id="agents" class="section">
+  <div class="container">
+    <div class="reveal">
+      <p class="eyebrow">Coding agents and CI</p>
+      <h2 class="section-title">If you run coding agents, you are already paying for this.</h2>
+    </div>
+
+    <div class="reveal">
+      <p class="lead">Coding agents create an isolated worktree per background session or task. Claude Code shells out to a plain <code>git worktree add</code> and locks the result; the harnesses and worktree managers people build on top do the same, because a worktree is the standard way to give an agent a tree it can break without touching yours.</p>
+
+      <div class="block">
+        <p class="block__label">What a harness runs, verbatim</p>
+        <button type="button" data-copy="#snippet-1" aria-label="Copy the What a harness runs verbatim snippet"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>
+        <pre><code id="snippet-1">git -c core.fsmonitor= worktree add --no-track -B &lt;branch&gt; &lt;path&gt; &lt;sha&gt;</code></pre>
+      </div>
+
+      <p class="note" style="margin-top:1.5rem">That changes the shape of the disk math. One engineer running several agents in parallel on a monorepo allocates a fresh <!--bench:kernel.disk.git.round-->1.8 GB<!--/bench--> per agent per task, and those worktrees are created and destroyed all day. On a CI or agent fleet it stops being a laptop annoyance and becomes a provisioning line item.</p>
+
+      <p class="note">Because the shim sits in front of <code>git</code> rather than in front of any particular tool, every harness gets this without knowing git-sprout exists: no plugin, no integration, no configuration inside the agent. The parity promise is what makes that safe: anything that intercepts <code>git</code> for an unattended session has to be indistinguishable from git.</p>
+    </div>
   </div>
 </section>
 
@@ -319,6 +423,7 @@ tr.is-headline th,tr.is-headline td{font-weight:700;color:var(--fg)}
       <p class="eyebrow">Install</p>
       <h2 class="section-title">One command.</h2>
     </div>
+
     <div class="reveal" style="margin-top:2rem">
       <div class="copy-row">
         <code id="install-cmd">brew install alltuner/tap/git-sprout</code>
@@ -326,15 +431,111 @@ tr.is-headline th,tr.is-headline td{font-weight:700;color:var(--fg)}
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
         </button>
       </div>
-      <p class="note" style="margin-top:1.25rem">Then <code>git sprout add ../feature -b feature</code>, exactly where you would have typed <code>git worktree add</code>.</p>
-      <div class="hero__actions" style="margin-top:2.25rem">
-        <a class="btn btn-primary" href="/details.html">How it works, and what it promises</a>
-        <a class="btn btn-ghost" href="https://github.com/alltuner/git-sprout">View source</a>
+
+      <p class="note" style="margin-top:1rem">Or <code>cargo install git-sprout</code>, or a binary from <a href="https://github.com/alltuner/git-sprout/releases">the releases page</a>.</p>
+
+      <div class="block">
+        <p class="block__label">Usage</p>
+        <button type="button" data-copy="#snippet-2" aria-label="Copy the Usage snippet"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>
+        <pre><code id="snippet-2">git sprout add ../myrepo-feature -b feature     # or: git worktree-fast add</code></pre>
       </div>
+
+      <p class="note" style="margin-top:1.5rem">Two things have to be true. The filesystem needs block cloning: <strong>APFS</strong> on macOS; <strong>btrfs, XFS with reflinks, or bcachefs</strong> on Linux; <strong>a ReFS volume or a Windows 11 Dev Drive</strong> on Windows. Everywhere else, ext4 and NTFS included, it runs plain <code>git worktree add</code>.</p>
+
+      <p class="note">And the repository has to be one that does not convert files on checkout, because a file can only be shared when checking it out would not rewrite its bytes. Git for Windows turns <code>core.autocrlf</code> on by default, and with that setting there is nothing to share, so on a typical Windows repository sprout passes straight through to <code>git worktree add</code>. The same goes for <code>* text=auto eol=crlf</code> on any platform. Repositories with no conversion attributes clone everything, which is the common case on macOS and Linux, the kernel included.</p>
     </div>
   </div>
 </section>
 
+<div class="divider"></div>
+
+<section id="automatic" class="section">
+  <div class="container">
+    <div class="reveal">
+      <p class="eyebrow">Make it automatic</p>
+      <h2 class="section-title">There is no git setting that can redirect <code>git worktree add</code>.</h2>
+      <p class="lead">Both were tested rather than assumed. Git ignores an alias that shadows a builtin, and builtins never go through <code>GIT_EXEC_PATH</code> or <code>PATH</code>. So there are exactly two ways to make every worktree on a machine cheaper, and both are things you install deliberately.</p>
+    </div>
+
+    <div class="reveal">
+      <h3 style="margin-top:2.5rem;font-size:1.05rem">1. A shell function, for what you type yourself</h3>
+      <p class="note">Each block rewrites <code>git worktree add</code> and passes everything else through untouched. It only affects the interactive shell.</p>
+
+      <div class="block">
+        <p class="block__label">bash / zsh — ~/.bashrc, ~/.zshrc</p>
+        <button type="button" data-copy="#snippet-3" aria-label="Copy the bash / zsh — /.bashrc /.zshrc snippet"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>
+        <pre><code id="snippet-3">git() {
+  if [ "${1:-}" = worktree ] &amp;&amp; [ "${2:-}" = add ]; then
+    shift 2
+    command git sprout add "$@"
+  else
+    command git "$@"
+  fi
+}</code></pre>
+      </div>
+
+      <div class="block">
+        <p class="block__label">fish — ~/.config/fish/config.fish</p>
+        <button type="button" data-copy="#snippet-4" aria-label="Copy the fish — /.config/fish/config.fish snippet"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>
+        <pre><code id="snippet-4">function git
+    if test (count $argv) -ge 2; and test "$argv[1]" = worktree; and test "$argv[2]" = add
+        command git sprout add $argv[3..]
+    else
+        command git $argv
+    end
+end</code></pre>
+      </div>
+
+      <div class="block">
+        <p class="block__label">PowerShell — $PROFILE</p>
+        <button type="button" data-copy="#snippet-5" aria-label="Copy the PowerShell — PROFILE snippet"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>
+        <pre><code id="snippet-5">function git {
+    $real = (Get-Command git -CommandType Application | Select-Object -First 1).Source
+    if ($args.Count -ge 2 -and $args[0] -eq 'worktree' -and $args[1] -eq 'add') {
+        $rest = @($args | Select-Object -Skip 2)
+        &amp; $real sprout add @rest
+    } else {
+        &amp; $real @args
+    }
+}</code></pre>
+      </div>
+
+      <div class="block">
+        <p class="block__label">nushell — $nu.config-path</p>
+        <button type="button" data-copy="#snippet-6" aria-label="Copy the nushell — nu.config-path snippet"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>
+        <pre><code id="snippet-6">def --wrapped git [...args] {
+    if ($args | length) >= 2 and $args.0 == "worktree" and $args.1 == "add" {
+        ^git sprout add ...($args | skip 2)
+    } else {
+        ^git ...$args
+    }
+}</code></pre>
+      </div>
+
+      <!-- TODO(M4): drop this caveat once the PowerShell block has been run on a real
+           machine. Every other block on this page was executed before publishing. -->
+      <p class="note" style="margin-top:1.25rem">The bash, zsh, fish and nushell blocks were executed against a real git before this page went up. The PowerShell one was reviewed line by line but has not been run on any machine yet, so treat it as unverified and <a href="https://github.com/alltuner/git-sprout/issues">say so if it misbehaves</a>.</p>
+
+      <p class="note" style="margin-top:1.25rem">Each one matches only <code>worktree add</code> as the first two words. <code>git -C dir worktree add</code>, and anything else a script or an editor runs, goes to git untouched. That is what the shim below is for.</p>
+
+      <!-- TODO(M5): confirm the exact wrapper path and profile line against the shipped
+           `git sprout install-shim` before this section goes live. -->
+      <h3 style="margin-top:3rem;font-size:1.05rem">2. A <code>git</code> shim on <code>PATH</code>, for everything else</h3>
+      <p class="note">Editors, worktree managers, CI jobs and agent harnesses spawn <code>git</code> themselves, so a shell function never sees them. The shim is a small <code>git</code> wrapper in its own directory that you put ahead of the real git on <code>PATH</code>; it rewrites <code>worktree add</code> and passes every other command straight through to the real git.</p>
+
+      <div class="block">
+<pre><code>git sprout install-shim      # prints the directory it wrote and the PATH line to add
+git sprout uninstall-shim    # removes it</code></pre>
+      </div>
+
+      <p class="note" style="margin-top:1.25rem"><code>brew install</code> never does this on its own. A wrapper in front of <code>git</code> is yours to opt into, and one command to undo.</p>
+
+      <p class="note">If you already use a worktree manager, this makes it cheaper without changing anything about it: the shim is in front of git, not in front of your tools.</p>
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
 </main>
 
 <footer class="site-footer">
@@ -342,7 +543,7 @@ tr.is-headline th,tr.is-headline td{font-weight:700;color:var(--fg)}
     <div>
       <div>Built by <a href="https://davidpoblador.com">David Poblador i Garcia</a> · <a href="https://alltuner.com">All Tuner Labs</a></div>
       <div class="site-footer__sub">Made with ❤️ in Poblenou, Barcelona 🇪🇺</div>
-      <div class="site-footer__budget">This page is <!--budget:site.size-->31 KB<!--/budget--> and <!--budget:site.requests-->3<!--/budget--> requests. So is your fifth worktree.</div>
+      <div class="site-footer__budget">This page is <!--budget:site.size-->36 KB<!--/budget--> and <!--budget:site.requests-->3<!--/budget--> requests. So is your fifth worktree.</div>
     </div>
     
     <nav class="site-footer__links" aria-label="Footer">
