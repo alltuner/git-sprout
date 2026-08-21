@@ -22,7 +22,7 @@
 
 > [!NOTE]
 > **Checked on every commit.** The contract below is compared against real
-> `git worktree add` across 28 repository fixtures and 41 argument shapes, on macOS,
+> `git worktree add` across 26 repository fixtures and 41 argument shapes, on macOS,
 > Linux (btrfs, XFS, ext4) and Windows (NTFS, ReFS), plus the Linux kernel on two
 > filesystems. The suite proves itself by detecting nineteen deliberately injected
 > differences and finding none when git is compared against itself. The kernel figures
@@ -225,6 +225,14 @@ git sprout uninstall-shim    # removes it
 
 `brew install` never does this on its own. A wrapper in front of `git` is yours to opt
 into, and one command to undo.
+
+## Prior art
+
+[`josharian/git-cow-worktree`](https://github.com/josharian/git-cow-worktree) got here
+first, in Go. Two of its ideas are in sprout: choosing the source worktree by commit
+distance, and hashing clones in parallel to write real stat data into the index instead
+of leaning on `core.checkStat`. [`joeinnes/cow`](https://github.com/joeinnes/cow) takes
+a looser approach to the same idea.
 
 ## Development
 
