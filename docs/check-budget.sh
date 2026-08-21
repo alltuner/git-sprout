@@ -17,7 +17,7 @@ for arg in "$@"; do
         *) PAGES+=("$arg") ;;
     esac
 done
-[ "${#PAGES[@]}" -eq 0 ] && PAGES=("$DOCS/index.html" "$DOCS/details.html")
+[ "${#PAGES[@]}" -eq 0 ] && PAGES=("$DOCS/index.html" "$DOCS/details.html" "$DOCS/404.html")
 
 marker_value() {
     sed -n "s/.*<!--budget:$2-->\([^<]*\)<!--\/budget-->.*/\1/p" "$1" | head -1
