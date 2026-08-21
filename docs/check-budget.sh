@@ -18,7 +18,7 @@ for arg in "$@"; do
         *) PAGES+=("$arg") ;;
     esac
 done
-[ "${#PAGES[@]}" -eq 0 ] && PAGES=("$DOCS/index.html" "$DOCS/details.html" "$DOCS/404.html")
+[ "${#PAGES[@]}" -eq 0 ] && PAGES=("$DOCS/index.html" "$DOCS/details.html")
 
 # Subresources on another host, which the browser must fetch to finish the page.
 #
