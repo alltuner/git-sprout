@@ -1,0 +1,42 @@
+# ABOUTME: Attaches docs/ to the release as site.tar.gz, for the fleet to publish.
+# ABOUTME: Builds the artifact only; the site publisher on durian places it.
+name: publish-site
+
+on:
+  release:
+    types: [published]
+  # Re-attach the artifact to the newest release without cutting a new one.
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish-site
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Check the byte budget
+        run: ./docs/check-budget.sh
+
+      # The scripts live beside the site and are not part of it.
+      - name: Build the artifact
+        run: tar -czf site.tar.gz -C docs --exclude='*.sh' .
+
+      # sites.yaml in alltuner/infrastructure decides which bucket this lands
+      # in; the publisher there polls for this asset. Nothing here holds a
+      # storage credential, and no self-hosted runner is involved.
+      - name: Attach it to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag='${{ github.event.release.tag_name }}'
+          if [ -z "$tag" ]; then
+            tag="$(gh release view --json tagName -q .tagName -R "$GITHUB_REPOSITORY")"
+          fi
+          gh release upload "$tag" site.tar.gz --clobber -R "$GITHUB_REPOSITORY"

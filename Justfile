@@ -51,9 +51,10 @@ site-numbers:
 site-check:
     ./docs/check-budget.sh
 
-# Publish docs/ to the sprout.alltuner.com Garage bucket (tailnet only).
+# Attach docs/ to the newest release, which is what publishes the site.
+# Cutting a release does this on its own; this is for re-publishing without one.
 deploy:
-    ./docs/deploy.sh
+    gh workflow run publish-site.yml
 
 # Clean build outputs.
 clean:
