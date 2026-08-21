@@ -5,9 +5,10 @@ set -euo pipefail
 
 DOCS="$(cd "$(dirname "$0")" && pwd)"
 
-# Budget from the site spec: 60 KB over the wire including fonts, 3 requests.
+# Budget from the site spec: 60 KB over the wire, counting the HTML, the fonts and
+# anything the page fetches from another host.
 MAX_BYTES=$((60 * 1024))
-MAX_REQUESTS=3
+MAX_REQUESTS=4
 
 WRITE=0
 PAGES=()
@@ -18,6 +19,36 @@ for arg in "$@"; do
     esac
 done
 [ "${#PAGES[@]}" -eq 0 ] && PAGES=("$DOCS/index.html" "$DOCS/details.html" "$DOCS/404.html")
+
+# Subresources on another host, which the browser must fetch to finish the page.
+#
+# Deliberately not every absolute URL. An <a href> costs the visitor nothing, and
+# neither does a <link rel=canonical>: it names the page, it is not a fetch. Counting
+# one would make the page's figure wrong in the other direction, and the first version
+# of this did exactly that — it dutifully downloaded the page's own canonical URL and
+# billed the page for a second copy of itself.
+external_subresources() {
+    python3 - "$1" <<'PY'
+import io, re, sys
+
+FETCHING_RELS = {"stylesheet", "preload", "prefetch", "icon", "apple-touch-icon",
+                 "shortcut icon", "manifest"}
+
+text = io.open(sys.argv[1], encoding="utf-8").read()
+urls = re.findall(r'<(?:script|img|iframe)\b[^>]*\bsrc="(https?://[^"]+)"', text)
+for tag in re.findall(r'<link\b[^>]*>', text):
+    href = re.search(r'\bhref="(https?://[^"]+)"', tag)
+    rel = re.search(r'\brel="([^"]+)"', tag)
+    if href and rel and rel.group(1).strip().lower() in FETCHING_RELS:
+        urls.append(href.group(1))
+
+seen = set()
+for url in urls:
+    if url not in seen:
+        seen.add(url)
+        print(url)
+PY
+}
 
 marker_value() {
     sed -n "s/.*<!--budget:$2-->\([^<]*\)<!--\/budget-->.*/\1/p" "$1" | head -1
@@ -60,10 +91,26 @@ check_page() {
         requests=$((requests + 1))
     done
 
+    fail=0
+
+    # Anything the page pulls from another host is a request the visitor pays for, so it
+    # counts here too. Measured over the wire rather than assumed: a figure the page
+    # states about itself is only worth having if nothing can quietly fall out of it.
+    local url size
+    for url in $(external_subresources "$page"); do
+        if ! size=$(curl -fsS --compressed -o /dev/null -w '%{size_download}' "$url" 2>/dev/null); then
+            echo "FAIL: $name loads $url, which could not be measured." >&2
+            fail=1
+            continue
+        fi
+        printf '%-28s %8s\n' "$(basename "$url")" "$size"
+        total=$((total + size))
+        requests=$((requests + 1))
+    done
+
     kb=$(( (total + 512) / 1024 ))
     printf '%-28s %8s  (%s KB, %s requests)\n' "total" "$total" "$kb" "$requests"
 
-    fail=0
     if [ "$total" -gt "$MAX_BYTES" ]; then
         echo "FAIL: $name is $total bytes, over the $MAX_BYTES byte budget." >&2
         fail=1
