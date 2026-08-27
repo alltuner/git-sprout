@@ -112,6 +112,21 @@ fn in_preference_order(worktrees: &[Worktree], current: Option<&Path>) -> Vec<Wo
     ordered
 }
 
+/// Include the checkout the command is running from when Git's worktree list
+/// reports only its common git directory, as happens for absorbed submodules.
+fn include_current_checkout(worktrees: &[Worktree], current: Option<Worktree>) -> Vec<Worktree> {
+    let mut candidates = worktrees.to_vec();
+    if let Some(current) = current {
+        if !candidates
+            .iter()
+            .any(|worktree| worktree.path == current.path)
+        {
+            candidates.push(current);
+        }
+    }
+    candidates
+}
+
 /// Chooses the checkout to clone from, or `None` when none can serve.
 ///
 /// Only worktrees of the same repository on the same device qualify, because a block
@@ -132,8 +147,19 @@ pub fn choose(
         .ok()
         .map(PathBuf::from)
     });
+    let current_worktree = current.as_ref().and_then(|path| {
+        git.capture_line(Some(path), ["rev-parse", "HEAD"])
+            .ok()
+            .map(|head| Worktree {
+                path: path.clone(),
+                head: Some(head),
+                bare: false,
+                prunable: false,
+            })
+    });
+    let worktrees = include_current_checkout(worktrees, current_worktree);
 
-    let candidates: Vec<Worktree> = in_preference_order(worktrees, current.as_deref())
+    let candidates: Vec<Worktree> = in_preference_order(&worktrees, current.as_deref())
         .into_iter()
         .filter(|worktree| !worktree.bare && !worktree.prunable)
         .filter(|worktree| worktree.path != destination)
@@ -216,5 +242,27 @@ mod tests {
         assert_eq!(ordered[0].path, PathBuf::from("/repo/b"));
         assert_eq!(ordered[1].path, PathBuf::from("/repo"));
         assert_eq!(ordered[2].path, PathBuf::from("/repo/a"));
+    }
+
+    #[test]
+    fn includes_an_absorbed_submodule_checkout_missing_from_gits_list() {
+        let listed = vec![Worktree {
+            path: PathBuf::from("/repo/.git/modules/sub"),
+            head: Some("abc".into()),
+            bare: false,
+            prunable: false,
+        }];
+        let current = Worktree {
+            path: PathBuf::from("/repo/sub"),
+            head: Some("abc".into()),
+            bare: false,
+            prunable: false,
+        };
+
+        let candidates = include_current_checkout(&listed, Some(current));
+        let ordered = in_preference_order(&candidates, Some(Path::new("/repo/sub")));
+
+        assert_eq!(ordered[0].path, PathBuf::from("/repo/sub"));
+        assert_eq!(ordered[1].path, PathBuf::from("/repo/.git/modules/sub"));
     }
 }
