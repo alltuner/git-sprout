@@ -1,6 +1,6 @@
 #!/usr/bin/env -S uv run --script
-# ABOUTME: Rewrites every figure in the site pages and README.md from the benchmark
-# ABOUTME: report, so no number on either surface can be one that no script produced.
+# ABOUTME: Rewrites every figure in the site pages and the READMEs from the benchmark
+# ABOUTME: report, so no number on any surface can be one that no script produced.
 # /// script
 # requires-python = ">=3.12"
 # dependencies = []
@@ -16,7 +16,12 @@ from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_REPORT = REPO_ROOT / "bench" / "results.json"
-TARGETS: list[str] = ["docs/index.html", "docs/details.html", "README.md"]
+TARGETS: list[str] = [
+    "docs/index.html",
+    "docs/details.html",
+    "README.md",
+    "crates/git-sprout/README.md",
+]
 
 # Figures the report produces and no surface publishes, on purpose.
 #

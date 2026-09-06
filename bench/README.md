@@ -1,6 +1,6 @@
 # bench — where every number on the site comes from
 
-The site and the README must never carry a hand-typed figure. The scripts here
+The site and the READMEs must never carry a hand-typed figure. The scripts here
 measure, write `results.json`, and rewrite the pages from it. If a number appears on
 a page that no script produced, `render-site-numbers.py` is supposed to fail.
 
@@ -10,7 +10,7 @@ bench/
   lib.sh                  timing, real-disk accounting, machine facts
   loopfs.sh               loopback btrfs / XFS / ext4 images for the Linux scenarios
   build-report.py         raw NDJSON -> bench.json
-  render-site-numbers.py  bench.json -> the figures in docs/index.html and README.md
+  render-site-numbers.py  bench.json -> the figures in docs/*.html and both READMEs
   results/bench.json      output of a local run (gitignored)
   results.json            the committed, release-time copy the pages render from
 ```
@@ -267,7 +267,7 @@ name no page carries is a figure that quietly stopped being regenerated. Both fa
 run. This is the same check as:
 
 ```bash
-grep -oh '<!--bench:[a-z0-9._-]*-->' docs/index.html README.md \
+grep -oh '<!--bench:[a-z0-9._-]*-->' docs/index.html README.md crates/git-sprout/README.md \
   | sed 's/<!--bench://;s/-->//' | sort -u
 ```
 
