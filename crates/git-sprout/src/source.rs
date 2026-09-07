@@ -139,14 +139,16 @@ pub fn choose(
     target_commit: &str,
 ) -> Option<PathBuf> {
     let destination_device = destination.parent().and_then(device_of);
-    let current = std::env::current_dir().ok().and_then(|cwd| {
-        git.capture_line(
-            Some(&cwd),
+    // Resolved with no directory of our own, exactly as the worktree listing was, so a
+    // caller's `-C` lands both in the same repository. A toplevel from somewhere else
+    // would name a checkout holding nothing the destination could clone.
+    let current = git
+        .capture_line(
+            None,
             ["rev-parse", "--path-format=absolute", "--show-toplevel"],
         )
         .ok()
-        .map(PathBuf::from)
-    });
+        .map(PathBuf::from);
     let current_worktree = current.as_ref().and_then(|path| {
         git.capture_line(Some(path), ["rev-parse", "HEAD"])
             .ok()
