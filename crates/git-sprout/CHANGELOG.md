@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.1.1](https://github.com/alltuner/git-sprout/compare/git-sprout-v0.1.0...git-sprout-v0.1.1) (2026-09-07)
+
+
+### Bug Fixes
+
+* **deps:** update rust crate gix-index to 0.55.0 ([#8](https://github.com/alltuner/git-sprout/issues/8)) ([30e088e](https://github.com/alltuner/git-sprout/commit/30e088e12df9d386b8ef4e44c6268a226902c541))
+* resolve the current checkout the way the worktree listing is ([#12](https://github.com/alltuner/git-sprout/issues/12)) ([11d1b75](https://github.com/alltuner/git-sprout/commit/11d1b754bc7d2cc202c454eb3f73c0a63d20806b))
+* use absorbed submodule checkout as source ([#9](https://github.com/alltuner/git-sprout/issues/9)) ([13cfaa3](https://github.com/alltuner/git-sprout/commit/13cfaa3138fe65214d73ee4fa71d7bbc3101a2e1))
+
+
+### Documentation Updates
+
+* give the package indexes a real page instead of a stub ([#11](https://github.com/alltuner/git-sprout/issues/11)) ([54cc0f9](https://github.com/alltuner/git-sprout/commit/54cc0f9e02cb62d7d3f3a42c7d0cb9cec7dc3b74))
+
 ## 0.1.0 (2026-08-20)
 
 
