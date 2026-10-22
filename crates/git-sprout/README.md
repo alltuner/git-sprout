@@ -5,7 +5,7 @@ that doesn't copy your tree.
 
 [Website](https://sprout.alltuner.com) ·
 [Repository](https://github.com/alltuner/git-sprout) ·
-[Sponsor](https://alltuner.com/sponsor)
+[Sponsor](https://alltuner.com/sponsor/)
 
 Every worktree you create is a second full copy of your repository on disk. `git-sprout`
 materialises the new worktree with filesystem copy-on-write clones of a checkout you
@@ -93,4 +93,4 @@ differences, and the reasoning behind the whole design, are written out in the
 
 Built by [David Poblador i Garcia](https://davidpoblador.com) with the support of
 [All Tuner Labs](https://alltuner.com). If this was useful to you,
-[consider supporting its development](https://alltuner.com/sponsor).
+[consider supporting its development](https://alltuner.com/sponsor/).
