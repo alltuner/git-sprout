@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.2](https://github.com/alltuner/git-sprout/compare/git-sprout-v0.1.1...git-sprout-v0.1.2) (2026-10-22)
+
+
+### Documentation Updates
+
+* link the sponsor page by its trailing-slash URL ([#18](https://github.com/alltuner/git-sprout/issues/18)) ([d2c0bbe](https://github.com/alltuner/git-sprout/commit/d2c0bbee71faac98d5bf7b5a2e3dfb830aafed08))
+
 ## [0.1.1](https://github.com/alltuner/git-sprout/compare/git-sprout-v0.1.0...git-sprout-v0.1.1) (2026-09-07)
 
 
