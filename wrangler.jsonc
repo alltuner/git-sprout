@@ -3,7 +3,8 @@
   "compatibility_date": "2026-10-26",
   "assets": {
     "directory": "./docs",
-    "not_found_handling": "404-page"
+    "not_found_handling": "404-page",
+    "html_handling": "none"
   },
   "routes": [{ "pattern": "sprout.alltuner.com", "custom_domain": true }],
   "workers_dev": true,
