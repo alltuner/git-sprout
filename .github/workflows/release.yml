@@ -256,3 +256,17 @@ jobs:
               -f message="git-sprout: add formula at v${VERSION}" \
               -f content="$ENCODED"
           fi
+
+  published-branch:
+    needs: resolve-tag
+    if: needs.resolve-tag.outputs.tag != ''
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - name: Move the published branch to the release
+        env:
+          TAG: ${{ needs.resolve-tag.outputs.tag }}
+        run: git push --force origin "${TAG}^{commit}:refs/heads/published"

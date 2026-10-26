@@ -1,0 +1,12 @@
+{
+  "name": "sprout-alltuner-com",
+  "compatibility_date": "2026-10-26",
+  "assets": {
+    "directory": "./docs",
+    "not_found_handling": "404-page"
+  },
+  "routes": [{ "pattern": "sprout.alltuner.com", "custom_domain": true }],
+  "workers_dev": true,
+  "preview_urls": true,
+  "previews": {}
+}

@@ -1,0 +1,11 @@
+https://:worker.:subdomain.workers.dev/*
+  X-Robots-Tag: noindex
+
+/
+  Cache-Control: public, max-age=300
+
+/*.html
+  Cache-Control: public, max-age=300
+
+/fonts/*
+  Cache-Control: public, max-age=31536000, immutable

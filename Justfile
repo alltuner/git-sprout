@@ -59,3 +59,7 @@ deploy:
 # Clean build outputs.
 clean:
     cargo clean
+
+# Check the site budget; docs/ is served as is.
+site:
+    bash docs/check-budget.sh
