@@ -45,6 +45,10 @@ Two things have to be true. The filesystem needs block cloning: **APFS** on macO
 XFS with reflinks, or bcachefs** on Linux; **a ReFS volume or a Windows 11 Dev Drive** on
 Windows. Everywhere else, ext4 and NTFS included, it runs plain `git worktree add`.
 
+Acceleration also requires Git 2.40 or later for immutable target-commit
+attribute queries (`git check-attr --source`). Older Git versions retain normal
+Git checkout behavior instead of using the clone path.
+
 And the repository has to be one that does not convert files on checkout, because a file can
 only be shared when checking it out would not rewrite its bytes. Git for Windows turns
 `core.autocrlf` on by default, and with that setting there is nothing to share, so on a
@@ -66,6 +70,11 @@ saving is close to total at every size, and cost there scales with file count ra
 bytes.
 
 ## The numbers
+
+The measurements below predate the concurrency safety checks. Each accepted clone
+is now read once to verify its Git blob identity, and APFS uses per-file clones
+instead of cloning entire directories. Copy-on-write block sharing is retained,
+but the timings and metadata overhead below need to be remeasured for this version.
 
 | workload | `git worktree add` | `git sprout add` |
 | --- | --- | --- |
