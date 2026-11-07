@@ -458,7 +458,7 @@ tr.is-headline th,tr.is-headline td{font-weight:700;color:var(--fg)}
     <div class="reveal">
       <p class="eyebrow">Make it automatic</p>
       <h2 class="section-title">There is no git setting that can redirect <code>git worktree add</code>.</h2>
-      <p class="lead">Both were tested rather than assumed. Git ignores an alias that shadows a builtin, and builtins never go through <code>GIT_EXEC_PATH</code> or <code>PATH</code>. So there are exactly two ways to make every worktree on a machine cheaper, and both are things you install deliberately.</p>
+      <p class="lead">Both were tested rather than assumed. Git ignores an alias that shadows a builtin, and builtins never go through <code>GIT_EXEC_PATH</code> or <code>PATH</code>. Shell functions cover interactive commands; an opt-in PATH shim also covers tools that find Git on PATH. Neither redirects absolute Git paths or processes that replace PATH.</p>
     </div>
 
     <div class="reveal">
@@ -522,19 +522,21 @@ end</code></pre>
 
       <p class="note" style="margin-top:1.25rem">Each one matches only <code>worktree add</code> as the first two words. <code>git -C dir worktree add</code>, and anything else a script or an editor runs, goes to git untouched. That is what the shim below is for.</p>
 
-      <!-- TODO(M5): confirm the exact wrapper path and profile line against the shipped
-           `git sprout install-shim` before this section goes live. -->
-      <h3 style="margin-top:3rem;font-size:1.05rem">2. A <code>git</code> shim on <code>PATH</code>, for everything else</h3>
+      <h3 style="margin-top:3rem;font-size:1.05rem">2. A <code>git</code> shim for tools that use <code>PATH</code></h3>
       <p class="note">Editors, worktree managers, CI jobs and agent harnesses spawn <code>git</code> themselves, so a shell function never sees them. The shim is a small <code>git</code> wrapper in its own directory that you put ahead of the real git on <code>PATH</code>; it rewrites <code>worktree add</code> and passes every other command straight through to the real git.</p>
 
       <div class="block">
-<pre><code>git sprout install-shim      # prints the directory it wrote and the PATH line to add
-git sprout uninstall-shim    # removes it</code></pre>
+<pre><code>git sprout install-shim --agents          # preview only; writes nothing
+git sprout install-shim --agents --apply  # opt in to Bash/Zsh and agent profiles
+git sprout run -- codex                   # scope PATH to an agent process
+git sprout uninstall-shim --apply         # remove managed integration</code></pre>
       </div>
 
       <p class="note" style="margin-top:1.25rem"><code>brew install</code> never does this on its own. A wrapper in front of <code>git</code> is yours to opt into, and one command to undo.</p>
 
-      <p class="note">If you already use a worktree manager, this makes it cheaper without changing anything about it: the shim is in front of git, not in front of your tools.</p>
+      <p class="note">The native installer supports Unix Bash/Zsh. It preserves existing profile content and configuration values; Claude JSON may be reformatted. Private backups include a restore manifest. Removing Sprout or its shim configuration leaves ordinary Git available through the generated wrapper.</p>
+      <p class="note">Add <code>--claude-worktrees</code> with <code>--agents</code> to opt into native Claude worktree hooks. This replaces Claude's <code>.worktreeinclude</code> behavior. Cleanup refuses changed, untracked or ignored data and retains branches. Resolve existing project/plugin lifecycle hooks separately before enabling it.</p>
+      <p class="note">See the <a href="https://github.com/alltuner/git-sprout/blob/main/integrations/agents/README.md">agent integration guide</a> for profile discovery, scoped account wrappers, limitations and uninstall behavior. Existing agents must be restarted; no sandbox or approval policy is changed.</p>
     </div>
   </div>
 </section>
@@ -547,7 +549,7 @@ git sprout uninstall-shim    # removes it</code></pre>
     <div>
       <div>Built by <a href="https://davidpoblador.com">David Poblador i Garcia</a> · <a href="https://alltuner.com">All Tuner Labs</a></div>
       <div class="site-footer__sub">Made with ❤️ in Poblenou, Barcelona 🇪🇺</div>
-      <div class="site-footer__budget">This page is <!--budget:site.size-->37 KB<!--/budget--> and <!--budget:site.requests-->4<!--/budget--> requests. So is your fifth worktree.</div>
+      <div class="site-footer__budget">This page is <!--budget:site.size-->39 KB<!--/budget--> and <!--budget:site.requests-->4<!--/budget--> requests. So is your fifth worktree.</div>
     </div>
     
     <nav class="site-footer__links" aria-label="Footer">

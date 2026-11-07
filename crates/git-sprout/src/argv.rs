@@ -322,6 +322,19 @@ fn parse_shorts(
     Ok(())
 }
 
+/// Select only supported Git worktree-add invocations, preserving original arguments.
+pub fn shim_add_args(args: &[OsString]) -> Option<Vec<OsString>> {
+    let (mut globals, rest) = take_globals(args)?;
+    if rest.first()?.to_str()? != "worktree" || rest.get(1)?.to_str()? != "add" {
+        return None;
+    }
+    globals.extend_from_slice(&rest[1..]);
+    match parse(&globals) {
+        Invocation::Add(add) if !add.no_cow => Some(globals),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

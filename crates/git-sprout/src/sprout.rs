@@ -3,7 +3,7 @@
 
 use std::collections::HashSet;
 use std::ffi::OsString;
-use std::io;
+use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -65,7 +65,7 @@ pub fn add(command: &AddCommand, stats: &mut Stats) -> ExitCode {
         return exit_code(created.code());
     }
 
-    let destination = locate(&git, command, &before);
+    let destination = locate(command);
 
     // From here on the worktree exists but holds no files, so every remaining step is
     // best effort and step 7 must run whatever happens. A panic in the clone phase would
@@ -161,23 +161,13 @@ fn worktrees(git: &Git) -> Vec<source::Worktree> {
         .unwrap_or_default()
 }
 
-/// Finds the worktree `git worktree add` just created.
-///
-/// The listing tells us directly which path is new, which needs no guessing about how a
-/// relative path resolved. The path the user asked for is the fallback.
-fn locate(git: &Git, command: &AddCommand, before: &[source::Worktree]) -> Option<PathBuf> {
-    let known: HashSet<&Path> = before
-        .iter()
-        .map(|worktree| worktree.path.as_path())
-        .collect();
-    let added = worktrees(git)
-        .into_iter()
-        .find(|worktree| !known.contains(worktree.path.as_path()))
-        .map(|worktree| worktree.path);
-    added.or_else(|| {
-        let requested = working_directory(&command.globals).join(as_path_os(&command.path));
-        requested.join(".git").exists().then_some(requested)
-    })
+/// Resolves our own destination, independent of other concurrent registrations.
+fn locate(command: &AddCommand) -> Option<PathBuf> {
+    let requested = working_directory(&command.globals).join(as_path_os(&command.path));
+    if !requested.join(".git").exists() {
+        return None;
+    }
+    std::fs::canonicalize(requested).ok()
 }
 
 /// The directory git resolves relative paths against, after applying every `-C`.
@@ -321,7 +311,7 @@ fn populate(git: &Git, destination: &Path, before: &[source::Worktree], stats: &
             .cloned(),
     );
     verified.paths.sort_by(|a, b| a.path.cmp(&b.path));
-    drop_converted_paths(git, &source, &mut verified.paths);
+    drop_converted_paths(git, destination, &head, &mut verified.paths, stats);
 
     let plan = plan::assemble(
         &target,
@@ -397,25 +387,42 @@ fn worktree_attributes(git: &Git, worktree: &Path) -> Option<Vec<u8>> {
 ///
 /// Every remaining path is one where the blob's bytes and the working tree's bytes are the
 /// same thing, which is what makes the index stat cache a sufficient answer. The
-/// attributes are read from the source, which is sound because the plan has already
-/// established that both sides carry the same attribute blobs.
-fn drop_converted_paths(git: &Git, source: &Path, paths: &mut Vec<Planned>) {
+/// attributes come from the immutable target commit: the source's attribute files
+/// can change after the earlier verification. Git versions without `--source`
+/// conservatively leave all paths to the normal checkout.
+fn drop_converted_paths(
+    git: &Git,
+    destination: &Path,
+    head: &str,
+    paths: &mut Vec<Planned>,
+    stats: &mut Stats,
+) {
     if paths.is_empty() {
         return;
     }
     let endings = LineEndings::from_config(
-        git.config(source, "core.autocrlf").as_deref(),
-        git.config(source, "core.eol").as_deref(),
+        git.config(destination, "core.autocrlf").as_deref(),
+        git.config(destination, "core.eol").as_deref(),
     );
     let mut request = Vec::new();
     for planned in paths.iter() {
         request.extend_from_slice(&planned.path);
         request.push(0);
     }
-    let mut arguments: Vec<&str> = vec!["check-attr", "-z", "--stdin"];
-    arguments.extend(attributes::CONVERTING_ATTRIBUTES);
-    let Ok(output) = git.capture_with_input(Some(source), arguments, &request) else {
+    let mut arguments = vec![
+        "check-attr".to_string(),
+        format!("--source={head}"),
+        "-z".to_string(),
+        "--stdin".to_string(),
+    ];
+    arguments.extend(
+        attributes::CONVERTING_ATTRIBUTES
+            .iter()
+            .map(|value| value.to_string()),
+    );
+    let Ok(output) = git.capture_with_input(Some(destination), arguments, &request) else {
         paths.clear();
+        stats.fall_back("git check-attr --source could not read target-commit attributes");
         return;
     };
     let reported = attributes::parse_check_attr(&output);
@@ -518,6 +525,13 @@ fn materialise(
         .iter()
         .filter_map(|planned| {
             let target = destination.join(as_path(&planned.path));
+            // A source writer can race the earlier stat check. A clone is a snapshot
+            // of the bytes at clone time, so verify that snapshot before pairing its
+            // stat data with the planned oid. Omitting an invalid clone from this
+            // index lets the final reset replace it with the real checkout.
+            if cloned_blob_oid(&target, planned.mode, planned.oid.kind()).ok()? != planned.oid {
+                return None;
+            }
             conform_to_checkout(&target, planned, umask).map(|stat| Record {
                 path: planned.path.clone(),
                 mode: planned.mode,
@@ -528,6 +542,37 @@ fn materialise(
         .collect();
 
     (records, demotion)
+}
+
+/// Hashes the clone itself, without clean filters. Converted paths never enter the
+/// clone plan; their checkout bytes must be produced by Git instead.
+fn cloned_blob_oid(path: &Path, mode: u32, kind: gix_hash::Kind) -> io::Result<gix_hash::ObjectId> {
+    let metadata = std::fs::symlink_metadata(path)?;
+    let mut hash = gix_hash::hasher(kind);
+    if mode == SYMLINK_MODE && metadata.file_type().is_symlink() {
+        let target = std::fs::read_link(path)?;
+        let bytes = target.as_os_str().as_encoded_bytes();
+        hash.update(format!("blob {}\0", bytes.len()).as_bytes());
+        hash.update(bytes);
+    } else {
+        if !metadata.is_file() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "clone is not a file",
+            ));
+        }
+        let mut file = std::fs::File::open(path)?;
+        hash.update(format!("blob {}\0", metadata.len()).as_bytes());
+        let mut buffer = [0; 64 * 1024];
+        loop {
+            let read = file.read(&mut buffer)?;
+            if read == 0 {
+                break;
+            }
+            hash.update(&buffer[..read]);
+        }
+    }
+    hash.try_finalize().map_err(io::Error::other)
 }
 
 /// Materialises one path. A symlink in the source is recreated as a symlink; there are no
@@ -579,11 +624,14 @@ fn symlink(_target: &Path, _link: &Path) -> io::Result<()> {
 /// Permissions are set first: changing them moves ctime, and the stat data has to describe
 /// the file as it is finally left.
 fn conform_to_checkout(path: &Path, planned: &Planned, umask: u32) -> Option<Stat> {
-    if planned.mode != SYMLINK_MODE {
+    let mut metadata = Metadata::from_path_no_follow(path).ok()?;
+    // With core.symlinks=false a symlink entry is materialised as a regular file.
+    // Its permissions must obey the checkout umask too; never chmod a real link.
+    if metadata.is_file() {
         set_mode(path, checkout_mode(planned.mode, umask));
+        metadata = Metadata::from_path_no_follow(path).ok()?;
     }
     let wanted = FileTime::from_unix_time(i64::from(planned.mtime.secs), planned.mtime.nsecs);
-    let mut metadata = Metadata::from_path_no_follow(path).ok()?;
     if Stat::from_fs(&metadata).ok()?.mtime != planned.mtime {
         filetime::set_symlink_file_times(path, wanted, wanted).ok()?;
         metadata = Metadata::from_path_no_follow(path).ok()?;
