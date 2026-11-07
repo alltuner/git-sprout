@@ -46,6 +46,9 @@ impl BlockCloner for Clonefile {
     }
 
     fn clones_directories(&self) -> bool {
-        true
+        // A directory can gain ignored/untracked entries after the planner checks
+        // its contents. Clone only named files until directory snapshots can be
+        // validated without leaking those entries into the new checkout.
+        false
     }
 }
