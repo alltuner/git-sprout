@@ -164,76 +164,38 @@ Beyond those two, and beyond time and disk, anything you can tell apart is a bug
 
 ## Make it automatic
 
-There is no git setting that can redirect `git worktree add`: git ignores an alias that
-shadows a builtin, and builtins never go through `GIT_EXEC_PATH` or `PATH`. Both were
-tested. So there are two ways, and both are things you install deliberately.
-
-**1. A shell function**, for what you type yourself. It only affects the interactive shell,
-and it matches only `worktree add` as the first two words.
+On Unix Bash/Zsh, the installed binary includes an opt-in PATH shim and agent
+integration. Preview the files first, then apply:
 
 ```bash
-# bash / zsh — ~/.bashrc, ~/.zshrc
-git() {
-  if [ "${1:-}" = worktree ] && [ "${2:-}" = add ]; then
-    shift 2
-    command git sprout add "$@"
-  else
-    command git "$@"
-  fi
-}
+git sprout install-shim --agents --claude-worktrees
+git sprout install-shim --agents --claude-worktrees --apply
 ```
 
-```fish
-# fish — ~/.config/fish/config.fish
-function git
-    if test (count $argv) -ge 2; and test "$argv[1]" = worktree; and test "$argv[2]" = add
-        command git sprout add $argv[3..]
-    else
-        command git $argv
-    end
-end
-```
+The shim routes supported `git [global options] worktree add` invocations through
+Sprout and delegates other argv unchanged to the recorded real Git. `--agents` adds
+managed startup activation and guidance for discovered Codex/Claude profiles.
+The optional `--claude-worktrees` also integrates Claude's native worktree isolation;
+its cleanup retains branches and refuses modified, untracked or ignored files.
+Omit these options for a standalone shim and source the printed activation line.
+Homebrew installation never activates the shim automatically.
 
-```powershell
-# PowerShell — $PROFILE
-function git {
-    $real = (Get-Command git -CommandType Application | Select-Object -First 1).Source
-    if ($args.Count -ge 2 -and $args[0] -eq 'worktree' -and $args[1] -eq 'add') {
-        $rest = @($args | Select-Object -Skip 2)
-        & $real sprout add @rest
-    } else {
-        & $real @args
-    }
-}
-```
-
-```nu
-# nushell — $nu.config-path
-def --wrapped git [...args] {
-    if ($args | length) >= 2 and $args.0 == "worktree" and $args.1 == "add" {
-        ^git sprout add ...($args | skip 2)
-    } else {
-        ^git ...$args
-    }
-}
-```
-
-The bash, zsh, fish and nushell blocks were executed against a real git before release.
-The PowerShell one was reviewed line by line but has not been run on any machine yet, so
-treat it as unverified and [say so if it misbehaves](https://github.com/alltuner/git-sprout/issues).
-
-**2. A `git` shim on `PATH`**, for everything else. Editors, worktree managers, CI jobs and
-agent harnesses spawn `git` themselves, so a shell function never sees them. The shim is a
-small `git` wrapper in its own directory that you put ahead of the real git on `PATH`; it
-rewrites `worktree add` and passes every other command straight through to the real git.
+Restart agents after installation, or explicitly launch an executable/account wrapper
+with the inherited shim PATH:
 
 ```bash
-git sprout install-shim      # prints the directory it wrote and the PATH line to add
-git sprout uninstall-shim    # removes it
+git sprout run -- codex
+git sprout run -- env CODEX_HOME="$HOME/.codex3" codex
+git sprout run -- /path/to/claude-account-wrapper
+
+git sprout uninstall-shim          # preview
+git sprout uninstall-shim --apply  # remove managed integration, retain backups
 ```
 
-`brew install` never does this on its own. A wrapper in front of `git` is yours to opt
-into, and one command to undo.
+Absolute Git paths, replacement PATH environments, shell-only account aliases, and
+external tools that bypass Git require separate handling. No approval or sandbox
+policy is changed. See [agent integration](integrations/agents/README.md) for profile
+discovery, explicit profile paths, lifecycle hook conflicts, limitations and tests.
 
 ## Prior art
 

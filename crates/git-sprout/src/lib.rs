@@ -74,3 +74,5 @@ fn head_is_unborn(add: &AddCommand) -> bool {
             .capture(None, ["rev-parse", "--verify", "--quiet", "HEAD"])
             .is_ok_and(|output| output.is_empty())
 }
+
+pub mod installer;

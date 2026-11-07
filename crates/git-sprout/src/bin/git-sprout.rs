@@ -4,5 +4,6 @@
 use std::process::ExitCode;
 
 fn main() -> ExitCode {
-    git_sprout::run(std::env::args_os().skip(1).collect())
+    let args: Vec<_> = std::env::args_os().skip(1).collect();
+    git_sprout::installer::dispatch(&args).unwrap_or_else(|| git_sprout::run(args))
 }
