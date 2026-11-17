@@ -289,6 +289,11 @@ fn populate(git: &Git, destination: &Path, before: &[source::Worktree], stats: &
             .into_iter()
             .collect();
     dirty_attributes.extend(source_attributes.untrusted);
+    dirty_attributes.extend(rewritten_attribute_files(
+        git,
+        &source,
+        &source_attributes.recorded,
+    ));
     dirty_attributes.extend(plan::untracked_attribute_files(
         &target,
         &source_attributes.recorded,
@@ -417,6 +422,66 @@ fn worktree_attributes(git: &Git, worktree: &Path) -> Option<Vec<u8>> {
     std::fs::read(path).ok()
 }
 
+/// The source's attributes files whose working copy git writes as other content than
+/// their blob, through a filter, `ident` or a `working-tree-encoding`.
+///
+/// Git reads the rules from the working copy, while the stat cache and `git diff-files`
+/// compare it with the blob only after cleaning it, so such a file can hold rules its blob
+/// does not and still be clean. A filter word `git check-attr` shares with a state is
+/// confirmed the way [`drop_converted_paths`] confirms it. A git that cannot answer is
+/// taken to rewrite them all.
+fn rewritten_attribute_files(
+    git: &Git,
+    source: &Path,
+    files: &std::collections::BTreeMap<Vec<u8>, gix_hash::ObjectId>,
+) -> Vec<Vec<u8>> {
+    if files.is_empty() {
+        return Vec::new();
+    }
+    let mut request = Vec::new();
+    for path in files.keys() {
+        request.extend_from_slice(path);
+        request.push(0);
+    }
+    let arguments = [
+        "check-attr",
+        "-z",
+        "--stdin",
+        "filter",
+        "ident",
+        "working-tree-encoding",
+    ];
+    let Ok(output) = git.capture_with_input(Some(source), arguments, &request) else {
+        return files.keys().cloned().collect();
+    };
+    let reported = attributes::parse_check_attr(&output);
+    let drivers = filter_drivers(git, source);
+    let decide = |values: &HashMap<String, Value>| attributes::rewrites_content(values);
+    let confirmed = confirm_states(
+        git,
+        source,
+        files.keys().map(Vec::as_slice),
+        &reported,
+        drivers,
+        decide,
+    );
+    files
+        .keys()
+        .filter(|path| {
+            let Some(values) = reported.get(*path) else {
+                return true;
+            };
+            let values = attributes::resolve_ambiguous(values, drivers, |magic| {
+                confirmed
+                    .get(magic)
+                    .is_some_and(|matched| matched.contains(*path))
+            });
+            decide(&values)
+        })
+        .cloned()
+        .collect()
+}
+
 /// Removes the paths a checkout would rewrite on its way to the working tree.
 ///
 /// Every remaining path is one where the blob's bytes and the working tree's bytes are the
@@ -447,7 +512,14 @@ fn drop_converted_paths(git: &Git, source: &Path, destination: &Path, paths: &mu
     let reported = attributes::parse_check_attr(&output);
     let decide = |values: &HashMap<String, Value>| attributes::converts(values, endings);
     let drivers = filter_drivers(git, source).or(filter_drivers(git, destination));
-    let confirmed = confirm_states(git, source, paths, &reported, drivers, decide);
+    let confirmed = confirm_states(
+        git,
+        source,
+        paths.iter().map(|planned| planned.path.as_slice()),
+        &reported,
+        drivers,
+        decide,
+    );
     paths.retain(|planned| {
         let Some(values) = reported.get(&planned.path) else {
             return false;
@@ -482,17 +554,17 @@ fn filter_drivers(git: &Git, worktree: &Path) -> FilterDrivers {
 /// read differently. The pathspec magic tells them apart: `:(attr:-name)` matches only
 /// `-name`, and `:(attr:!name)` only no setting. A git that cannot answer confirms
 /// nothing, and every such state is then read as the string.
-fn confirm_states(
+fn confirm_states<'a>(
     git: &Git,
     source: &Path,
-    paths: &[Planned],
+    paths: impl IntoIterator<Item = &'a [u8]>,
     reported: &HashMap<Vec<u8>, HashMap<String, Value>>,
     drivers: FilterDrivers,
     decide: impl Fn(&HashMap<String, Value>) -> bool + Copy,
 ) -> HashMap<String, HashSet<Vec<u8>>> {
     let magic: BTreeSet<String> = paths
-        .iter()
-        .filter_map(|planned| reported.get(&planned.path))
+        .into_iter()
+        .filter_map(|path| reported.get(path))
         .flat_map(|values| attributes::ambiguous_to_confirm(values, drivers, decide))
         .collect();
     magic

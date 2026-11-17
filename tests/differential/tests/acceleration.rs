@@ -13,12 +13,14 @@ use differential::run::Tool;
 /// `git check-attr` prints as it prints those states, are converted and left to git.
 /// `attrs-untracked` leaves to git the directory an ignored `.gitattributes` marks in the
 /// source alone, and still clones the one a tracked `-text` marks on both sides, and
-/// `attrs-assumed` does the same for a tracked one changed under `--assume-unchanged`.
+/// `attrs-assumed` and `attrs-filtered` do the same for a tracked one changed under
+/// `--assume-unchanged` or behind a clean filter.
 const ACCELERATED: &[&str] = &[
     "text-heavy",
     "attrs-reserved-values",
     "attrs-untracked",
     "attrs-assumed",
+    "attrs-filtered",
 ];
 
 /// Fixtures where cloning is expected to fire on nothing at all.
