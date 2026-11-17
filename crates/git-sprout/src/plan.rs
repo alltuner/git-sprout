@@ -358,6 +358,36 @@ pub fn source_attribute_files(
     (files, suspect)
 }
 
+/// The attributes files in the source's working tree that its index does not record, in
+/// the directories of the target tree.
+///
+/// Git reads a directory's `.gitattributes` from the working tree whether or not it is
+/// tracked, so an untracked or ignored one shapes what `git check-attr` reports for the
+/// source while a checkout of the target never sees it. Its directory is then no more
+/// alike on both sides than one whose tracked attributes differ.
+pub fn untracked_attribute_files(
+    target: &Listing,
+    source_attributes: &BTreeMap<Vec<u8>, ObjectId>,
+    source_root: &Path,
+) -> Vec<Vec<u8>> {
+    let root: &[u8] = &[];
+    std::iter::once(root)
+        .chain(target.trees.keys().map(Vec::as_slice))
+        .map(|directory| {
+            let mut path = directory.to_vec();
+            if !path.is_empty() {
+                path.push(b'/');
+            }
+            path.extend_from_slice(crate::tree::ATTRIBUTES_FILE);
+            path
+        })
+        .filter(|path| {
+            !source_attributes.contains_key(path)
+                && std::fs::symlink_metadata(source_root.join(as_path(path))).is_ok()
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -494,6 +524,48 @@ mod tests {
         assert!(paths.contains(b"Doc".as_slice()));
         assert!(paths.contains(b"doc".as_slice()));
         assert_eq!(prefixes, vec![b"doc/".to_vec()]);
+    }
+
+    /// Git reads a `.gitattributes` from the source's working tree even where the index
+    /// records none, as an untracked or ignored file. A checkout of the target reads only
+    /// the target's own, so what such a file says about a path is no guide to the
+    /// destination.
+    #[test]
+    fn reports_attributes_files_only_the_source_working_tree_holds() {
+        let scratch = std::env::temp_dir().join(format!(
+            "git-sprout-untracked-attributes-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&scratch);
+        for directory in ["src", "docs", "tracked"] {
+            std::fs::create_dir_all(scratch.join(directory)).unwrap();
+        }
+        std::fs::write(scratch.join("src/.gitattributes"), "*.txt -crlf\n").unwrap();
+        std::fs::write(scratch.join("tracked/.gitattributes"), "*.txt -text\n").unwrap();
+        let target = listing(
+            &[
+                ("src/a.txt", 1),
+                ("docs/b.txt", 2),
+                ("tracked/c.txt", 3),
+                ("tracked/.gitattributes", 5),
+            ],
+            &[("src", 6), ("docs", 7), ("tracked", 8)],
+            &[],
+        );
+        let recorded: BTreeMap<Vec<u8>, ObjectId> =
+            [(b"tracked/.gitattributes".to_vec(), oid(5))].into();
+
+        assert_eq!(
+            untracked_attribute_files(&target, &recorded, &scratch),
+            vec![b"src/.gitattributes".to_vec()]
+        );
+
+        std::fs::write(scratch.join(".gitattributes"), "* -text\n").unwrap();
+        assert_eq!(
+            untracked_attribute_files(&target, &recorded, &scratch),
+            vec![b".gitattributes".to_vec(), b"src/.gitattributes".to_vec()]
+        );
+        let _ = std::fs::remove_dir_all(&scratch);
     }
 
     #[test]

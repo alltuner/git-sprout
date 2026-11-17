@@ -11,7 +11,9 @@ use differential::run::Tool;
 /// `-text` are binary to git, so a checkout writes them as stored and they are cloned,
 /// while its paths given the string values `unset` and `unspecified`, which
 /// `git check-attr` prints as it prints those states, are converted and left to git.
-const ACCELERATED: &[&str] = &["text-heavy", "attrs-reserved-values"];
+/// `attrs-untracked` leaves to git the directory an ignored `.gitattributes` marks in the
+/// source alone, and still clones the one a tracked `-text` marks on both sides.
+const ACCELERATED: &[&str] = &["text-heavy", "attrs-reserved-values", "attrs-untracked"];
 
 /// Fixtures where cloning is expected to fire on nothing at all.
 ///

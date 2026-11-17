@@ -279,9 +279,14 @@ fn populate(git: &Git, destination: &Path, before: &[source::Worktree], stats: &
 
     let (source_attributes, suspect_attributes) =
         plan::source_attribute_files(&source_index, &source);
-    let dirty_attributes: Vec<Vec<u8>> = changed_paths(git, &source, &suspect_attributes)
+    let mut dirty_attributes: Vec<Vec<u8>> = changed_paths(git, &source, &suspect_attributes)
         .into_iter()
         .collect();
+    dirty_attributes.extend(plan::untracked_attribute_files(
+        &target,
+        &source_attributes,
+        &source,
+    ));
     let mut poisoned = verify::poisoned_prefixes(
         &target.attribute_files(),
         &source_attributes,
