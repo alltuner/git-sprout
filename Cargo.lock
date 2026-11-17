@@ -226,7 +226,7 @@ dependencies = [
 
 [[package]]
 name = "git-sprout"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "filetime",
  "gix-hash",
