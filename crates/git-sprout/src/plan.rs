@@ -332,18 +332,37 @@ pub fn as_path(path: &[u8]) -> PathBuf {
     PathBuf::from(String::from_utf8_lossy(path).into_owned())
 }
 
-/// The `.gitattributes` blobs the source index records, split into the ones its stat cache
-/// vouches for and the ones only git can settle by re-reading the file.
+/// The `.gitattributes` entries of the source index, sorted by how far each can be trusted.
+pub struct SourceAttributeFiles {
+    /// Every blob the index records, by path.
+    pub recorded: BTreeMap<Vec<u8>, ObjectId>,
+    /// The ones the stat cache does not vouch for, which only git can settle by re-reading
+    /// the file.
+    pub suspect: Vec<Vec<u8>>,
+    /// The ones whose entry git has stopped checking against the file at all
+    /// (`--assume-unchanged`, `--skip-worktree`, intent to add), where neither the blob
+    /// nor git can say what rules the file holds.
+    pub untrusted: Vec<Vec<u8>>,
+}
+
+/// The `.gitattributes` blobs the source index records, and which of them the plan can
+/// take at the index's word.
 pub fn source_attribute_files(
     source_index: &gix_index::File,
     source_root: &Path,
-) -> (BTreeMap<Vec<u8>, ObjectId>, Vec<Vec<u8>>) {
+) -> SourceAttributeFiles {
     let mut files = BTreeMap::new();
     let mut suspect = Vec::new();
+    let mut untrusted = Vec::new();
     let timestamp = source_index.timestamp();
     for entry in source_index.entries() {
         let path = entry.path(source_index).to_vec();
         if !crate::tree::is_attributes_file(&path) {
+            continue;
+        }
+        if verify::entry_is_untrustworthy(entry.flags) {
+            files.insert(path.clone(), entry.id);
+            untrusted.push(path);
             continue;
         }
         let verdict =
@@ -355,7 +374,11 @@ pub fn source_attribute_files(
             suspect.push(path);
         }
     }
-    (files, suspect)
+    SourceAttributeFiles {
+        recorded: files,
+        suspect,
+        untrusted,
+    }
 }
 
 /// The attributes files in the source's working tree that its index does not record, in
@@ -566,6 +589,56 @@ mod tests {
             vec![b".gitattributes".to_vec(), b"src/.gitattributes".to_vec()]
         );
         let _ = std::fs::remove_dir_all(&scratch);
+    }
+
+    /// An index entry git no longer checks against the working tree, such as one marked
+    /// `--assume-unchanged`, says nothing about the file git reads its rules from, and
+    /// `git diff-files` will not report the difference either.
+    #[test]
+    fn an_attributes_file_git_does_not_check_is_untrusted() {
+        let repo = std::env::temp_dir().join(format!(
+            "git-sprout-assumed-attributes-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&repo);
+        let git = crate::git::Git::new(Vec::new());
+        git.capture(
+            None,
+            [
+                std::ffi::OsStr::new("init"),
+                std::ffi::OsStr::new("-q"),
+                repo.as_os_str(),
+            ],
+        )
+        .expect("git init");
+        std::fs::create_dir_all(repo.join("sub")).unwrap();
+        std::fs::write(repo.join(".gitattributes"), "*.txt text\n").unwrap();
+        std::fs::write(repo.join("sub/.gitattributes"), "*.txt text\n").unwrap();
+        git.capture(Some(&repo), ["add", "--", "."])
+            .expect("git add");
+        git.capture(
+            Some(&repo),
+            [
+                "update-index",
+                "--assume-unchanged",
+                "--",
+                "sub/.gitattributes",
+            ],
+        )
+        .expect("git update-index");
+        let index = gix_index::File::at(
+            repo.join(".git").join("index"),
+            gix_hash::Kind::Sha1,
+            true,
+            gix_index::decode::Options::default(),
+        )
+        .expect("read index");
+
+        let files = source_attribute_files(&index, &repo);
+
+        assert_eq!(files.recorded.len(), 2);
+        assert_eq!(files.untrusted, vec![b"sub/.gitattributes".to_vec()]);
+        let _ = std::fs::remove_dir_all(&repo);
     }
 
     #[test]
