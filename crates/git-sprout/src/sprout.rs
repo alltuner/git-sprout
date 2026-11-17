@@ -1,7 +1,7 @@
 // ABOUTME: Runs an accelerated `git worktree add`: git creates and finishes the worktree,
 // ABOUTME: and in between the tool clones whatever the source checkout can supply.
 
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::ffi::OsString;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -12,7 +12,7 @@ use gix_index::entry::Stat;
 use gix_index::fs::Metadata;
 
 use crate::argv::AddCommand;
-use crate::attributes::{self, LineEndings};
+use crate::attributes::{self, LineEndings, Value};
 use crate::clone::{self, BlockCloner};
 use crate::delegate;
 use crate::git::Git;
@@ -409,10 +409,57 @@ fn drop_converted_paths(git: &Git, source: &Path, paths: &mut Vec<Planned>) {
         return;
     };
     let reported = attributes::parse_check_attr(&output);
-    paths.retain(|planned| match reported.get(&planned.path) {
-        Some(values) => !attributes::converts(values, endings),
-        None => false,
+    let decide = |values: &HashMap<String, Value>| attributes::converts(values, endings);
+    let confirmed = confirm_unsets(git, source, paths, &reported, decide);
+    paths.retain(|planned| {
+        let Some(values) = reported.get(&planned.path) else {
+            return false;
+        };
+        let values = attributes::resolve_unsets(values, |name| {
+            confirmed
+                .get(name)
+                .is_some_and(|unset| unset.contains(&planned.path))
+        });
+        !decide(&values)
     });
+}
+
+/// For each attribute some path reports as an ambiguous `unset` that `decide` depends on,
+/// the paths git matches as `-name`.
+///
+/// `git check-attr` prints `unset` both for `-name` and for the string value `unset`,
+/// which git reads differently, but the `attr` pathspec magic tells them apart:
+/// `:(attr:-name)` matches only the first. A git that cannot answer confirms nothing, and
+/// every such `unset` is then read as the string.
+fn confirm_unsets(
+    git: &Git,
+    source: &Path,
+    paths: &[Planned],
+    reported: &HashMap<Vec<u8>, HashMap<String, Value>>,
+    decide: impl Fn(&HashMap<String, Value>) -> bool + Copy,
+) -> HashMap<String, HashSet<Vec<u8>>> {
+    let names: BTreeSet<String> = paths
+        .iter()
+        .filter_map(|planned| reported.get(&planned.path))
+        .flat_map(|values| attributes::unsets_to_confirm(values, decide))
+        .collect();
+    names
+        .into_iter()
+        .map(|name| {
+            let pathspec = format!(":(attr:-{name})");
+            let unset = git
+                .capture(Some(source), ["ls-files", "-z", "--", &pathspec])
+                .map(|output| {
+                    output
+                        .split(|byte| *byte == 0)
+                        .filter(|path| !path.is_empty())
+                        .map(<[u8]>::to_vec)
+                        .collect()
+                })
+                .unwrap_or_default();
+            (name, unset)
+        })
+        .collect()
 }
 
 /// The line-ending options as git reads them. `core.autocrlf` is a boolean or `input`,
@@ -721,6 +768,77 @@ mod tests {
         std::fs::write(&config, text).expect("write config");
         assert!(line_endings(&git, &repo).expect("git answers").autocrlf);
 
+        let _ = std::fs::remove_dir_all(&repo);
+    }
+
+    /// `git check-attr` prints `unset` both for `-crlf` and for the string value
+    /// `crlf=unset`, and the same for `text`. Git ignores the string and applies
+    /// core.autocrlf, which writes CRLF, so only a genuine `-crlf` or `-text` may keep a
+    /// path out of git's hands. Real git does the reading here, because the reading is
+    /// git's to make.
+    #[test]
+    fn only_a_genuine_unset_keeps_a_path_from_core_autocrlf() {
+        let repo =
+            std::env::temp_dir().join(format!("git-sprout-unset-string-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&repo);
+        let git = Git::new(Vec::new());
+        git.capture(
+            None,
+            [OsStr::new("init"), OsStr::new("-q"), repo.as_os_str()],
+        )
+        .expect("git init");
+        std::fs::write(
+            repo.join(".gitattributes"),
+            "*.crlf-string crlf=unset\n\
+             *.crlf-unset -crlf\n\
+             *.text-string text=unset\n\
+             *.text-unset -text\n\
+             *.text-string-crlf-unset text=unset -crlf\n\
+             *.text-unset-crlf-string -text crlf=unset\n\
+             *.both-string text=unset crlf=unset\n",
+        )
+        .expect("write attributes");
+        let names = [
+            "a.crlf-string",
+            "a.crlf-unset",
+            "a.text-string",
+            "a.text-unset",
+            "a.text-string-crlf-unset",
+            "a.text-unset-crlf-string",
+            "a.both-string",
+        ];
+        for name in names {
+            std::fs::write(repo.join(name), "one\ntwo\n").expect("write file");
+        }
+        git.capture(Some(&repo), ["add", "--", "."])
+            .expect("git add");
+        git.capture(Some(&repo), ["config", "core.autocrlf", "true"])
+            .expect("git config");
+        let mut paths: Vec<Planned> = names
+            .iter()
+            .map(|name| Planned {
+                path: name.as_bytes().to_vec(),
+                mode: 0o100644,
+                oid: gix_hash::ObjectId::null(gix_hash::Kind::Sha1),
+                mtime: gix_index::entry::stat::Time::default(),
+            })
+            .collect();
+
+        drop_converted_paths(&git, &repo, &mut paths);
+
+        let kept: Vec<&[u8]> = paths
+            .iter()
+            .map(|planned| planned.path.as_slice())
+            .collect();
+        assert_eq!(
+            kept,
+            [
+                b"a.crlf-unset".as_slice(),
+                b"a.text-unset",
+                b"a.text-string-crlf-unset",
+                b"a.text-unset-crlf-string",
+            ]
+        );
         let _ = std::fs::remove_dir_all(&repo);
     }
 

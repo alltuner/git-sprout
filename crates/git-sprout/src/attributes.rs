@@ -38,6 +38,60 @@ impl Value {
     }
 }
 
+/// What git makes of the string value `unset` for an attribute, where that is not what it
+/// makes of `-name`.
+///
+/// `git check-attr` prints `unset` for both, so its output cannot tell them apart.
+/// `text` and its deprecated spelling `crlf` ignore a value they do not know and fall
+/// through to the next source, `crlf` and then the configuration, as an unspecified
+/// attribute does. `filter` and `working-tree-encoding` take the string as the name of a
+/// driver or an encoding. `eol` and `ident` read it as they read `-name`.
+fn unset_as_string(name: &str) -> Option<Value> {
+    match name {
+        "text" | "crlf" => Some(Value::Unspecified),
+        "filter" | "working-tree-encoding" => Some(Value::Named("unset".into())),
+        _ => None,
+    }
+}
+
+/// The path's attributes with every ambiguous `unset` that `confirmed` does not vouch for
+/// read as the string value `unset`, which is what git makes of it then. `confirmed` is
+/// asked by attribute name whether git matched the path as `-name`.
+pub fn resolve_unsets(
+    values: &HashMap<String, Value>,
+    confirmed: impl Fn(&str) -> bool,
+) -> HashMap<String, Value> {
+    values
+        .iter()
+        .map(|(name, value)| {
+            let read = match unset_as_string(name) {
+                Some(string) if value == &Value::Unset && !confirmed(name) => string,
+                _ => value.clone(),
+            };
+            (name.clone(), read)
+        })
+        .collect()
+}
+
+/// The attributes reported as `unset` on this path that git has to confirm as `-name`
+/// before `decide` may rely on them: the ambiguous ones, when reading every one of them as
+/// the string value `unset` changes the answer. Empty when the two readings agree, in
+/// which case the answer stands either way.
+pub fn unsets_to_confirm<T: PartialEq>(
+    values: &HashMap<String, Value>,
+    decide: impl Fn(&HashMap<String, Value>) -> T,
+) -> Vec<String> {
+    let ambiguous: Vec<String> = values
+        .iter()
+        .filter(|(name, value)| **value == Value::Unset && unset_as_string(name).is_some())
+        .map(|(name, _)| name.clone())
+        .collect();
+    if ambiguous.is_empty() || decide(values) == decide(&resolve_unsets(values, |_| false)) {
+        return Vec::new();
+    }
+    ambiguous
+}
+
 /// The line-ending configuration in force for a worktree.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LineEndings {
@@ -81,6 +135,8 @@ impl LineEndings {
 /// `eol=crlf` is clean and yet a checkout would write CRLF, which git itself warns about
 /// as "LF will be replaced by CRLF the next time Git touches it". Such a path is left to
 /// git, which writes the converted form.
+///
+/// An `Unset` here is taken as `-name`; [`resolve_unsets`] is what makes that so.
 pub fn converts(values: &HashMap<String, Value>, endings: LineEndings) -> bool {
     for name in ["ident", "filter", "working-tree-encoding"] {
         if values.get(name).is_some_and(Value::applies) {
@@ -198,6 +254,70 @@ mod tests {
             &values(&[("text", Value::Unset), ("crlf", Value::Set)]),
             PLAIN
         ));
+    }
+
+    const AUTOCRLF: LineEndings = LineEndings {
+        autocrlf: true,
+        crlf: false,
+    };
+
+    /// `git check-attr` prints `unset` both for `-crlf` and for `crlf=unset`. Git ignores
+    /// the string and applies core.autocrlf, so until git confirms `-crlf` the path is
+    /// read as having no `crlf` at all. The same holds for `text`.
+    #[test]
+    fn an_unconfirmed_unset_is_read_as_the_string_git_ignores() {
+        for name in ["crlf", "text"] {
+            let reported = values(&[(name, Value::Unset)]);
+            let unconfirmed = resolve_unsets(&reported, |_| false);
+            assert_eq!(unconfirmed[name], Value::Unspecified, "{name}");
+            assert!(converts(&unconfirmed, AUTOCRLF), "{name}");
+            let confirmed = resolve_unsets(&reported, |confirmed| confirmed == name);
+            assert_eq!(confirmed[name], Value::Unset, "{name}");
+            assert!(!converts(&confirmed, AUTOCRLF), "{name}");
+        }
+    }
+
+    #[test]
+    fn a_string_unset_filter_or_encoding_names_a_driver() {
+        for name in ["filter", "working-tree-encoding"] {
+            let reported = values(&[(name, Value::Unset)]);
+            assert!(
+                converts(&resolve_unsets(&reported, |_| false), PLAIN),
+                "{name}"
+            );
+            assert!(
+                !converts(&resolve_unsets(&reported, |_| true), PLAIN),
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn eol_and_ident_read_the_string_as_unset() {
+        let reported = values(&[("eol", Value::Unset), ("ident", Value::Unset)]);
+        assert_eq!(resolve_unsets(&reported, |_| false), reported);
+        assert!(unsets_to_confirm(&reported, |values| converts(values, AUTOCRLF)).is_empty());
+    }
+
+    /// Asking git costs a pass over the index, so it is asked only where the answer
+    /// depends on it.
+    #[test]
+    fn an_unset_is_confirmed_only_where_the_readings_disagree() {
+        let decide =
+            |endings: LineEndings| move |values: &HashMap<String, Value>| converts(values, endings);
+        let binary = values(&[("text", Value::Unset)]);
+        assert!(unsets_to_confirm(&binary, decide(PLAIN)).is_empty());
+        assert_eq!(unsets_to_confirm(&binary, decide(AUTOCRLF)), ["text"]);
+        let mut both = unsets_to_confirm(
+            &values(&[("text", Value::Unset), ("crlf", Value::Unset)]),
+            decide(AUTOCRLF),
+        );
+        both.sort();
+        assert_eq!(both, ["crlf", "text"]);
+        // A path another attribute converts either way needs nothing confirmed.
+        let with_eol = values(&[("crlf", Value::Unset), ("ident", Value::Set)]);
+        assert!(unsets_to_confirm(&with_eol, decide(PLAIN)).is_empty());
+        assert!(unsets_to_confirm(&values(&[("text", Value::Set)]), decide(AUTOCRLF)).is_empty());
     }
 
     #[test]

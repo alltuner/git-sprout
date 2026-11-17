@@ -6,7 +6,11 @@ use differential::flags;
 use differential::run::Tool;
 
 /// Fixtures whose whole point is that cloning fires.
-const ACCELERATED: &[&str] = &["text-heavy"];
+///
+/// `attrs-unset-string` runs under `core.autocrlf=true`, and its paths marked `-crlf` or
+/// `-text` are binary to git, so a checkout writes them as stored and they are cloned,
+/// while its paths given the string value `unset` are converted and left to git.
+const ACCELERATED: &[&str] = &["text-heavy", "attrs-unset-string"];
 
 /// Fixtures where cloning is expected to fire on nothing at all.
 ///
