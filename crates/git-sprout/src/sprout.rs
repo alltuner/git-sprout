@@ -378,6 +378,11 @@ fn conversion_mismatch(git: &Git, source: &Path, destination: &Path) -> Option<S
             return Some(format!("{key} differs between the worktrees"));
         }
     }
+    if let Some(reason) =
+        attribute_source_from_environment(std::env::var_os("GIT_ATTR_SOURCE").as_deref())
+    {
+        return Some(reason);
+    }
     if let Some(reason) = attribute_source_reads_per_worktree(git, source) {
         return Some(reason);
     }
@@ -404,6 +409,12 @@ fn attribute_source_reads_per_worktree(git: &Git, worktree: &Path) -> Option<Str
     }
     git.config(worktree, "attr.tree")
         .map(|_| "attr.tree names a tree to read attributes from".to_string())
+}
+
+/// Why `GIT_ATTR_SOURCE`, given as `value`, would make the worktrees read attributes
+/// differently, if it would.
+fn attribute_source_from_environment(value: Option<&std::ffi::OsStr>) -> Option<String> {
+    value.map(|_| "GIT_ATTR_SOURCE names a tree to read attributes from".to_string())
 }
 
 /// The contents of a worktree's own `info/attributes`, if it has one.
@@ -1064,6 +1075,18 @@ mod tests {
             Some("attr.tree names a tree to read attributes from".to_string()),
         );
         let _ = std::fs::remove_dir_all(&scratch);
+    }
+
+    /// `GIT_ATTR_SOURCE`, which `git --attr-source` also sets, names a tree-ish to read
+    /// attributes from in place of the working tree, and one such as `HEAD` resolves in
+    /// each worktree's own history.
+    #[test]
+    fn a_tree_named_in_the_environment_is_a_mismatch() {
+        assert_eq!(attribute_source_from_environment(None), None);
+        assert_eq!(
+            attribute_source_from_environment(Some(OsStr::new("HEAD"))),
+            Some("GIT_ATTR_SOURCE names a tree to read attributes from".to_string()),
+        );
     }
 
     /// Git reads the destination's configuration when it checks the destination out, and
