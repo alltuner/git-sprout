@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.1.3](https://github.com/alltuner/git-sprout/compare/git-sprout-v0.1.2...git-sprout-v0.1.3) (2026-11-17)
+
+
+### Bug Fixes
+
+* **deps:** update gix-hash to 0.28 and gix-index to 0.58 together ([#26](https://github.com/alltuner/git-sprout/issues/26)) ([ca14e8d](https://github.com/alltuner/git-sprout/commit/ca14e8db8a98d21b4adfc6508dd0490ff85eb75f))
+
+
+### Documentation Updates
+
+* mark the git shim as planned ([#27](https://github.com/alltuner/git-sprout/issues/27)) ([b44b355](https://github.com/alltuner/git-sprout/commit/b44b355b24b75a3b25d7a109fbdbdc652a638ed2))
+
 ## [0.1.2](https://github.com/alltuner/git-sprout/compare/git-sprout-v0.1.1...git-sprout-v0.1.2) (2026-11-17)
 
 
