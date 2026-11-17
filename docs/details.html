@@ -414,7 +414,7 @@ tr.is-headline th,tr.is-headline td{font-weight:700;color:var(--fg)}
 
       <p class="note" style="margin-top:1.5rem">That changes the shape of the disk math. One engineer running several agents in parallel on a monorepo allocates a fresh <!--bench:kernel.disk.git.round-->1.8 GB<!--/bench--> per agent per task, and those worktrees are created and destroyed all day. On a CI or agent fleet it stops being a laptop annoyance and becomes a provisioning line item.</p>
 
-      <p class="note">Because the shim sits in front of <code>git</code> rather than in front of any particular tool, every harness gets this without knowing git-sprout exists: no plugin, no integration, no configuration inside the agent. The parity promise is what makes that safe: anything that intercepts <code>git</code> for an unattended session has to be indistinguishable from git.</p>
+      <p class="note">Once the <a href="#automatic">planned shim</a> ships, it will sit in front of <code>git</code> rather than in front of any particular tool, so every harness gets this without knowing git-sprout exists: no plugin, no integration, no configuration inside the agent. The parity promise is what makes that safe: anything that intercepts <code>git</code> for an unattended session has to be indistinguishable from git.</p>
     </div>
   </div>
 </section>
@@ -524,15 +524,15 @@ end</code></pre>
 
       <!-- TODO(M5): confirm the exact wrapper path and profile line against the shipped
            `git sprout install-shim` before this section goes live. -->
-      <h3 style="margin-top:3rem;font-size:1.05rem">2. A <code>git</code> shim on <code>PATH</code>, for everything else</h3>
-      <p class="note">Editors, worktree managers, CI jobs and agent harnesses spawn <code>git</code> themselves, so a shell function never sees them. The shim is a small <code>git</code> wrapper in its own directory that you put ahead of the real git on <code>PATH</code>; it rewrites <code>worktree add</code> and passes every other command straight through to the real git.</p>
+      <h3 style="margin-top:3rem;font-size:1.05rem">2. A <code>git</code> shim on <code>PATH</code>, for everything else (planned)</h3>
+      <p class="note"><strong>Not shipped yet.</strong> Editors, worktree managers, CI jobs and agent harnesses spawn <code>git</code> themselves, so a shell function never sees them. The shim will be a small <code>git</code> wrapper in its own directory that you put ahead of the real git on <code>PATH</code>; it rewrites <code>worktree add</code> and passes every other command straight through to the real git. The binary does not have these commands yet; this is what they will look like:</p>
 
       <div class="block">
 <pre><code>git sprout install-shim      # prints the directory it wrote and the PATH line to add
 git sprout uninstall-shim    # removes it</code></pre>
       </div>
 
-      <p class="note" style="margin-top:1.25rem"><code>brew install</code> never does this on its own. A wrapper in front of <code>git</code> is yours to opt into, and one command to undo.</p>
+      <p class="note" style="margin-top:1.25rem"><code>brew install</code> will never do this on its own. A wrapper in front of <code>git</code> is yours to opt into, and one command to undo.</p>
 
       <p class="note">If you already use a worktree manager, this makes it cheaper without changing anything about it: the shim is in front of git, not in front of your tools.</p>
     </div>
@@ -547,7 +547,7 @@ git sprout uninstall-shim    # removes it</code></pre>
     <div>
       <div>Built by <a href="https://davidpoblador.com">David Poblador i Garcia</a> · <a href="https://alltuner.com">All Tuner Labs</a></div>
       <div class="site-footer__sub">Made with ❤️ in Poblenou, Barcelona 🇪🇺</div>
-      <div class="site-footer__budget">This page is <!--budget:site.size-->37 KB<!--/budget--> and <!--budget:site.requests-->4<!--/budget--> requests. So is your fifth worktree.</div>
+      <div class="site-footer__budget">This page is <!--budget:site.size-->40 KB<!--/budget--> and <!--budget:site.requests-->4<!--/budget--> requests. So is your fifth worktree.</div>
     </div>
     
     <nav class="site-footer__links" aria-label="Footer">

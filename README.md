@@ -213,17 +213,19 @@ The bash, zsh, fish and nushell blocks were executed against a real git before r
 The PowerShell one was reviewed line by line but has not been run on any machine yet, so
 treat it as unverified and [say so if it misbehaves](https://github.com/alltuner/git-sprout/issues).
 
-**2. A `git` shim on `PATH`**, for everything else. Editors, worktree managers, CI jobs and
-agent harnesses spawn `git` themselves, so a shell function never sees them. The shim is a
-small `git` wrapper in its own directory that you put ahead of the real git on `PATH`; it
-rewrites `worktree add` and passes every other command straight through to the real git.
+**2. A `git` shim on `PATH`**, for everything else. *Planned, not shipped yet.* Editors,
+worktree managers, CI jobs and agent harnesses spawn `git` themselves, so a shell function
+never sees them. The shim will be a small `git` wrapper in its own directory that you put
+ahead of the real git on `PATH`; it rewrites `worktree add` and passes every other command
+straight through to the real git. The binary does not have these commands yet; this is
+what they will look like:
 
 ```bash
 git sprout install-shim      # prints the directory it wrote and the PATH line to add
 git sprout uninstall-shim    # removes it
 ```
 
-`brew install` never does this on its own. A wrapper in front of `git` is yours to opt
+`brew install` will never do this on its own. A wrapper in front of `git` is yours to opt
 into, and one command to undo.
 
 ## Prior art
