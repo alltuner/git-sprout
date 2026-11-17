@@ -23,7 +23,7 @@ pub struct Record {
 #[derive(Debug)]
 pub enum Error {
     UnknownMode(u32),
-    Write(gix_index::file::write::Error),
+    Write(gix_error::Error),
 }
 
 /// The only index version this writes. Git keeps whatever version it reads, so a
