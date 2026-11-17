@@ -373,10 +373,32 @@ fn conversion_mismatch(git: &Git, source: &Path, destination: &Path) -> Option<S
             return Some(format!("{key} differs between the worktrees"));
         }
     }
+    if let Some(reason) = attribute_source_reads_per_worktree(git, source) {
+        return Some(reason);
+    }
     let source_attributes = worktree_attributes(git, source);
     let destination_attributes = worktree_attributes(git, destination);
     (source_attributes != destination_attributes)
         .then(|| "the worktrees have different attributes files".to_string())
+}
+
+/// Why a configured attributes source would read differently in each worktree even when
+/// both name it alike, if it would. A relative `core.attributesFile` is a path from the
+/// worktree's root, so each worktree reads its own file, and `attr.tree` names a tree-ish,
+/// and one such as `HEAD` resolves in each worktree's own history.
+fn attribute_source_reads_per_worktree(git: &Git, worktree: &Path) -> Option<String> {
+    if git
+        .config(worktree, "core.attributesFile")
+        .is_some_and(|file| {
+            !(Path::new(&file).is_absolute()
+                || file.starts_with('~')
+                || file.starts_with("%(prefix)/"))
+        })
+    {
+        return Some("core.attributesFile is relative to each worktree".to_string());
+    }
+    git.config(worktree, "attr.tree")
+        .map(|_| "attr.tree names a tree to read attributes from".to_string())
 }
 
 /// The contents of a worktree's own `info/attributes`, if it has one.
@@ -883,7 +905,7 @@ mod tests {
     /// when it checks the destination out, so the source's attributes are then no guide to
     /// what the checkout writes.
     #[test]
-    fn attribute_sources_only_the_destination_reads_are_a_mismatch() {
+    fn attribute_sources_the_worktrees_read_differently_are_a_mismatch() {
         let scratch = std::env::temp_dir().join(format!(
             "git-sprout-branch-attributes-{}",
             std::process::id()
@@ -946,6 +968,29 @@ mod tests {
                 Some(format!("{section}.{key} differs between the worktrees")),
             );
         }
+        std::fs::write(&include, "").expect("clear include");
+
+        // The same relative name selects a file in each worktree's own root, and the same
+        // tree-ish, such as `HEAD`, a tree in each worktree's own history.
+        let shared = |key: &str, value: &str| {
+            git.capture(Some(&repo), ["config", key, value])
+                .expect("git config");
+        };
+        shared("core.attributesFile", "local.attributes");
+        assert_eq!(
+            conversion_mismatch(&git, &repo, &destination),
+            Some("core.attributesFile is relative to each worktree".to_string()),
+        );
+        let absolute = scratch.join("shared.attributes");
+        shared("core.attributesFile", &absolute.to_string_lossy());
+        assert_eq!(conversion_mismatch(&git, &repo, &destination), None);
+        shared("core.attributesFile", "~/shared.attributes");
+        assert_eq!(conversion_mismatch(&git, &repo, &destination), None);
+        shared("attr.tree", "HEAD");
+        assert_eq!(
+            conversion_mismatch(&git, &repo, &destination),
+            Some("attr.tree names a tree to read attributes from".to_string()),
+        );
         let _ = std::fs::remove_dir_all(&scratch);
     }
 
