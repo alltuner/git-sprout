@@ -31,14 +31,16 @@ const SYMLINK_MODE: u32 = 0o120000;
 /// The most paths worth naming on one `git diff-files` command line.
 const RACY_PATH_LIMIT: usize = 1000;
 
-/// The configuration that decides how blob bytes become working-tree bytes. Cloning is
-/// only sound when both worktrees resolve all of it the same way.
+/// The configuration that decides how blob bytes become working-tree bytes, including
+/// where attributes come from and how their patterns match (`core.ignoreCase`). Cloning
+/// is only sound when both worktrees resolve all of it the same way.
 const CONVERSION_KEYS: &[&str] = &[
     "core.autocrlf",
     "core.eol",
     "core.symlinks",
     "core.attributesFile",
     "attr.tree",
+    "core.ignoreCase",
 ];
 
 /// Creates the worktree, cloning what it can and letting git finish the job.
@@ -1043,6 +1045,7 @@ mod tests {
         for (section, key, value) in [
             ("core", "attributesFile", "topic.attributes"),
             ("attr", "tree", "HEAD"),
+            ("core", "ignoreCase", "false"),
         ] {
             std::fs::write(&include, format!("[{section}]\n\t{key} = {value}\n"))
                 .expect("write include");
