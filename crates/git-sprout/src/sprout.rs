@@ -33,7 +33,13 @@ const RACY_PATH_LIMIT: usize = 1000;
 
 /// The configuration that decides how blob bytes become working-tree bytes. Cloning is
 /// only sound when both worktrees resolve all of it the same way.
-const CONVERSION_KEYS: &[&str] = &["core.autocrlf", "core.eol", "core.symlinks"];
+const CONVERSION_KEYS: &[&str] = &[
+    "core.autocrlf",
+    "core.eol",
+    "core.symlinks",
+    "core.attributesFile",
+    "attr.tree",
+];
 
 /// Creates the worktree, cloning what it can and letting git finish the job.
 pub fn add(command: &AddCommand, stats: &mut Stats) -> ExitCode {
@@ -869,6 +875,77 @@ mod tests {
             ]
         );
         let _ = std::fs::remove_dir_all(&repo);
+    }
+
+    /// An include can name an attributes file, or a tree to read attributes from, for the
+    /// destination alone, such as one `includeIf.onbranch` adds for its branch. Git reads it
+    /// when it checks the destination out, so the source's attributes are then no guide to
+    /// what the checkout writes.
+    #[test]
+    fn attribute_sources_only_the_destination_reads_are_a_mismatch() {
+        let scratch = std::env::temp_dir().join(format!(
+            "git-sprout-branch-attributes-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&scratch);
+        let (repo, destination) = (scratch.join("repo"), scratch.join("destination"));
+        let git = Git::new(Vec::new());
+        git.capture(
+            None,
+            [OsStr::new("init"), OsStr::new("-q"), repo.as_os_str()],
+        )
+        .expect("git init");
+        std::fs::write(repo.join("a.txt"), "one\n").expect("write file");
+        for args in [
+            &["add", "--", "."][..],
+            &[
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@example.invalid",
+                "commit",
+                "-q",
+                "--no-gpg-sign",
+                "-m",
+                "base",
+            ],
+            &["checkout", "-q", "--detach"],
+            &[
+                "config",
+                "includeIf.onbranch:topic.path",
+                "topic-attributes",
+            ],
+        ] {
+            git.capture(Some(&repo), args).expect("git");
+        }
+        git.capture(
+            Some(&repo),
+            [
+                OsStr::new("worktree"),
+                OsStr::new("add"),
+                OsStr::new("-q"),
+                OsStr::new("--no-checkout"),
+                OsStr::new("-b"),
+                OsStr::new("topic"),
+                destination.as_os_str(),
+            ],
+        )
+        .expect("git worktree add");
+        let include = repo.join(".git").join("topic-attributes");
+
+        assert_eq!(conversion_mismatch(&git, &repo, &destination), None);
+        for (section, key, value) in [
+            ("core", "attributesFile", "topic.attributes"),
+            ("attr", "tree", "HEAD"),
+        ] {
+            std::fs::write(&include, format!("[{section}]\n\t{key} = {value}\n"))
+                .expect("write include");
+            assert_eq!(
+                conversion_mismatch(&git, &repo, &destination),
+                Some(format!("{section}.{key} differs between the worktrees")),
+            );
+        }
+        let _ = std::fs::remove_dir_all(&scratch);
     }
 
     /// Git reads the destination's configuration when it checks the destination out, and
