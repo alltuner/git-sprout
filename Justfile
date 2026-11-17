@@ -51,15 +51,13 @@ site-numbers:
 site-check:
     ./docs/check-budget.sh
 
-# Attach docs/ to the newest release, which is what publishes the site.
-# Cutting a release does this on its own; this is for re-publishing without one.
-deploy:
-    gh workflow run publish-site.yml
-
 # Clean build outputs.
 clean:
     cargo clean
 
-# Check the site budget; docs/ is served as is.
+# Build the site for Workers Builds: docs/ is served as is, with each page's stated size
+# rewritten to what it measures now. The figures include meta.alltuner.com/meta.js, which
+# changes outside this repo, so a stale figure is corrected here rather than failing the
+# deploy. Going over the byte or request budget still fails.
 site:
-    bash docs/check-budget.sh
+    bash docs/check-budget.sh --write
