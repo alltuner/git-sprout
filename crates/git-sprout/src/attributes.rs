@@ -3,9 +3,16 @@
 
 use std::collections::HashMap;
 
-/// The attributes that decide whether checking a blob out rewrites its bytes.
-pub const CONVERTING_ATTRIBUTES: &[&str] =
-    &["text", "eol", "ident", "filter", "working-tree-encoding"];
+/// The attributes that decide whether checking a blob out rewrites its bytes. `crlf` is
+/// the deprecated spelling of `text`, which git still reads where `text` is unspecified.
+pub const CONVERTING_ATTRIBUTES: &[&str] = &[
+    "text",
+    "crlf",
+    "eol",
+    "ident",
+    "filter",
+    "working-tree-encoding",
+];
 
 /// What `git check-attr` reports for one attribute on one path.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -65,7 +72,7 @@ pub fn converts(values: &HashMap<String, Value>, endings: LineEndings) -> bool {
             return true;
         }
     }
-    let text = values.get("text").unwrap_or(&Value::Unspecified);
+    let text = text_attribute(values);
     if text == &Value::Unset {
         return false;
     }
@@ -76,6 +83,16 @@ pub fn converts(values: &HashMap<String, Value>, endings: LineEndings) -> bool {
         return true;
     }
     endings.autocrlf || endings.crlf
+}
+
+/// The path's `text` attribute, or where that is unspecified its deprecated `crlf`
+/// spelling, the way git's own conversion reads them: `crlf` means `text`, `-crlf` means
+/// `-text`, and `crlf=input` means `text eol=lf`.
+fn text_attribute(values: &HashMap<String, Value>) -> &Value {
+    match values.get("text") {
+        Some(text) if text != &Value::Unspecified => text,
+        _ => values.get("crlf").unwrap_or(&Value::Unspecified),
+    }
 }
 
 /// Reads the `<path> NUL <attribute> NUL <value> NUL` triples `git check-attr -z` writes.
@@ -129,6 +146,21 @@ mod tests {
     fn text_alone_rewrites_the_bytes() {
         assert!(converts(
             &values(&[("text", Value::Named("auto".into()))]),
+            PLAIN
+        ));
+    }
+
+    #[test]
+    fn the_deprecated_crlf_attribute_marks_text() {
+        assert!(converts(&values(&[("crlf", Value::Set)]), PLAIN));
+        assert!(converts(
+            &values(&[("crlf", Value::Named("input".into()))]),
+            PLAIN
+        ));
+        assert!(!converts(&values(&[("crlf", Value::Unset)]), PLAIN));
+        // An explicit `text` wins over the deprecated spelling.
+        assert!(!converts(
+            &values(&[("text", Value::Unset), ("crlf", Value::Set)]),
             PLAIN
         ));
     }
