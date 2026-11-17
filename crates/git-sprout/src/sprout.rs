@@ -3,16 +3,18 @@
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::ffi::OsString;
-use std::io;
+use std::io::{self, Read};
+use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use filetime::FileTime;
 use gix_index::entry::Stat;
 use gix_index::fs::Metadata;
 
 use crate::argv::AddCommand;
-use crate::attributes::{self, FilterDrivers, LineEndings, Value};
+use crate::attributes::{self, Checkout, FilterDrivers, LineEndings, Value};
 use crate::clone::{self, BlockCloner};
 use crate::delegate;
 use crate::git::Git;
@@ -333,7 +335,7 @@ fn populate(git: &Git, destination: &Path, before: &[source::Worktree], stats: &
             .cloned(),
     );
     verified.paths.sort_by(|a, b| a.path.cmp(&b.path));
-    drop_converted_paths(git, &source, destination, &mut verified.paths);
+    let compare_bytes = drop_converted_paths(git, &source, destination, &mut verified.paths);
 
     let plan = plan::assemble(
         &target,
@@ -344,7 +346,16 @@ fn populate(git: &Git, destination: &Path, before: &[source::Worktree], stats: &
         cloner.clones_directories(),
     );
 
-    let (records, demotion) = materialise(cloner.as_ref(), &source, destination, &plan);
+    let (records, demotion, content) = materialise(
+        cloner.as_ref(),
+        &source,
+        destination,
+        &plan,
+        &compare_bytes,
+        object_hash,
+    );
+    stats.content_checked = content.checked;
+    stats.content_rejected = content.rejected;
     stats.cloned_directories = if demotion.is_none() {
         plan.directories.len()
     } else {
@@ -515,21 +526,31 @@ fn attribute_files_unlike_their_blobs(
         .collect()
 }
 
-/// Removes the paths a checkout would rewrite on its way to the working tree.
+/// Removes the paths a checkout would rewrite on its way to the working tree, and returns
+/// the ones whose clones have to be compared byte for byte before they are trusted.
 ///
-/// Every remaining path is one where the blob's bytes and the working tree's bytes are the
-/// same thing, which is what makes the index stat cache a sufficient answer. The
-/// attributes are read from the source, which is sound because the plan has already
-/// established that both sides carry the same attribute blobs. The filter drivers are read
-/// from both, because a configuration include can give the destination a driver the
-/// source lacks.
-fn drop_converted_paths(git: &Git, source: &Path, destination: &Path, paths: &mut Vec<Planned>) {
+/// Every remaining path is one where a checkout writes the blob's bytes unchanged. For a
+/// path nothing converts, the working tree's bytes are the blob's too, which is what makes
+/// the index stat cache a sufficient answer. For a text path checked out with LF it is
+/// not: adding the file may have normalised CRLF away, so a stat-clean source file only
+/// cleans back to the blob, and the returned set names those paths for
+/// `reject_mismatched_clones`. The attributes are read from the source, which is sound
+/// because the plan has already established that both sides carry the same attribute
+/// blobs. The filter drivers are read from both, because a configuration include can give
+/// the destination a driver the source lacks.
+fn drop_converted_paths(
+    git: &Git,
+    source: &Path,
+    destination: &Path,
+    paths: &mut Vec<Planned>,
+) -> HashSet<Vec<u8>> {
+    let mut compare_bytes = HashSet::new();
     if paths.is_empty() {
-        return;
+        return compare_bytes;
     }
     let Ok(endings) = line_endings(git, source) else {
         paths.clear();
-        return;
+        return compare_bytes;
     };
     let mut request = Vec::new();
     for planned in paths.iter() {
@@ -540,10 +561,10 @@ fn drop_converted_paths(git: &Git, source: &Path, destination: &Path, paths: &mu
     arguments.extend(attributes::CONVERTING_ATTRIBUTES);
     let Ok(output) = git.capture_with_input(Some(source), arguments, &request) else {
         paths.clear();
-        return;
+        return compare_bytes;
     };
     let reported = attributes::parse_check_attr(&output);
-    let decide = |values: &HashMap<String, Value>| attributes::converts(values, endings);
+    let decide = |values: &HashMap<String, Value>| attributes::checkout(values, endings);
     let drivers = filter_drivers(git, source).or(filter_drivers(git, destination));
     let confirmed = confirm_states(
         git,
@@ -563,13 +584,22 @@ fn drop_converted_paths(git: &Git, source: &Path, destination: &Path, paths: &mu
                 .get(magic)
                 .is_some_and(|matched| matched.contains(&planned.path))
         });
-        let keep = !decide(&values);
-        if keep && attributes::marks_binary(&values) {
-            binary.insert(planned.path.clone());
+        match decide(&values) {
+            Checkout::Verbatim => {
+                if attributes::marks_binary(&values) {
+                    binary.insert(planned.path.clone());
+                }
+                true
+            }
+            Checkout::VerbatimIfBytesMatch => {
+                compare_bytes.insert(planned.path.clone());
+                true
+            }
+            Checkout::Rewritten => false,
         }
-        keep
     });
     drop_resized_binary_paths(git, source, paths, &binary);
+    compare_bytes
 }
 
 /// Removes the paths an attribute marks binary whose source file is not the size of its
@@ -647,13 +677,13 @@ fn filter_drivers(git: &Git, worktree: &Path) -> FilterDrivers {
 /// read differently. The pathspec magic tells them apart: `:(attr:-name)` matches only
 /// `-name`, and `:(attr:!name)` only no setting. A git that cannot answer confirms
 /// nothing, and every such state is then read as the string.
-fn confirm_states<'a>(
+fn confirm_states<'a, T: PartialEq>(
     git: &Git,
     source: &Path,
     paths: impl IntoIterator<Item = &'a [u8]>,
     reported: &HashMap<Vec<u8>, HashMap<String, Value>>,
     drivers: FilterDrivers,
-    decide: impl Fn(&HashMap<String, Value>) -> bool + Copy,
+    decide: impl Fn(&HashMap<String, Value>) -> T + Copy,
 ) -> HashMap<String, HashSet<Vec<u8>>> {
     let magic: BTreeSet<String> = paths
         .into_iter()
@@ -722,17 +752,30 @@ fn changed_paths(git: &Git, source: &Path, paths: &[Vec<u8>]) -> HashSet<Vec<u8>
         .collect()
 }
 
+/// How many clones were compared byte for byte against their blobs, and how many of those
+/// did not match and were removed for git to write.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+struct ContentCheck {
+    checked: usize,
+    rejected: usize,
+}
+
 /// Clones the plan and reports what actually landed.
 ///
 /// The first failed clone demotes the run: the rest of the plan is abandoned rather than
 /// retried path by path, because a filesystem that cannot clone one file cannot clone the
 /// next one either. Whatever was cloned before the failure is still correct and is kept.
+///
+/// Clones named in `compare_bytes` are hashed before they are recorded, and one whose
+/// bytes are not its blob is removed and left for git to write.
 fn materialise(
     cloner: &dyn BlockCloner,
     source: &Path,
     destination: &Path,
     plan: &plan::Plan,
-) -> (Vec<Record>, Option<String>) {
+    compare_bytes: &HashSet<Vec<u8>>,
+    object_hash: gix_hash::Kind,
+) -> (Vec<Record>, Option<String>, ContentCheck) {
     let mut demotion = None;
     let umask = umask();
 
@@ -781,9 +824,17 @@ fn materialise(
         }
     }
 
+    let to_compare: Vec<&Planned> = plan
+        .materialised
+        .iter()
+        .filter(|planned| compare_bytes.contains(&planned.path))
+        .collect();
+    let (content, rejected) = reject_mismatched_clones(destination, &to_compare, object_hash);
+
     let records = plan
         .materialised
         .iter()
+        .filter(|planned| !rejected.contains(planned.path.as_slice()))
         .filter_map(|planned| {
             let target = destination.join(as_path(&planned.path));
             conform_to_checkout(&target, planned, umask).map(|stat| Record {
@@ -795,7 +846,156 @@ fn materialise(
         })
         .collect();
 
-    (records, demotion)
+    (records, demotion, content)
+}
+
+/// What hashing one clone found.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CloneBytes {
+    /// The clone's raw bytes are the blob.
+    Match,
+    /// They are not, or could not be read. Git writes the path.
+    Mismatch,
+    /// Nothing was cloned at this path, because a demotion stopped the run first.
+    Absent,
+}
+
+/// Hashes the given clones against their blobs, spread over the available cores, removes
+/// every clone whose bytes are not its blob, and returns the paths it removed.
+///
+/// The hash is of the clone's raw bytes, never of the bytes run through the clean filter:
+/// the question is whether the file on disk is what a checkout writes, and for these paths
+/// a checkout writes the blob verbatim. A stat-clean source file only promises that
+/// *cleaning* it gives the blob, which a file holding the CRLF that `git add` normalised
+/// away satisfies while holding different bytes. Hashing the clone rather than the source
+/// also settles the source changing between the plan and the clone.
+fn reject_mismatched_clones<'a>(
+    destination: &Path,
+    clones: &[&'a Planned],
+    object_hash: gix_hash::Kind,
+) -> (ContentCheck, HashSet<&'a [u8]>) {
+    let mut content = ContentCheck::default();
+    let mut rejected = HashSet::new();
+    if clones.is_empty() {
+        return (content, rejected);
+    }
+    let workers = std::thread::available_parallelism()
+        .map_or(1, NonZeroUsize::get)
+        .min(clones.len());
+    let next = AtomicUsize::new(0);
+    let mut verdicts: Vec<Option<CloneBytes>> = vec![None; clones.len()];
+    std::thread::scope(|scope| {
+        let handles: Vec<_> = (0..workers)
+            .map(|_| {
+                scope.spawn(|| {
+                    let mut found = Vec::new();
+                    loop {
+                        let at = next.fetch_add(1, Ordering::Relaxed);
+                        let Some(planned) = clones.get(at) else {
+                            break;
+                        };
+                        let verdict = if interrupt::requested() {
+                            CloneBytes::Mismatch
+                        } else {
+                            clone_bytes(
+                                &destination.join(as_path(&planned.path)),
+                                planned,
+                                object_hash,
+                            )
+                        };
+                        found.push((at, verdict));
+                    }
+                    found
+                })
+            })
+            .collect();
+        for handle in handles {
+            // A worker that panicked leaves its paths without a verdict, and those are
+            // treated as mismatches below.
+            for (at, verdict) in handle.join().unwrap_or_default() {
+                verdicts[at] = Some(verdict);
+            }
+        }
+    });
+
+    for (planned, verdict) in clones.iter().zip(verdicts) {
+        match verdict.unwrap_or(CloneBytes::Mismatch) {
+            CloneBytes::Absent => {}
+            CloneBytes::Match => content.checked += 1,
+            CloneBytes::Mismatch => {
+                content.checked += 1;
+                content.rejected += 1;
+                let _ = std::fs::remove_file(destination.join(as_path(&planned.path)));
+                rejected.insert(planned.path.as_slice());
+            }
+        }
+    }
+    (content, rejected)
+}
+
+/// Compares one clone's raw bytes with the blob it stands in for.
+fn clone_bytes(path: &Path, planned: &Planned, object_hash: gix_hash::Kind) -> CloneBytes {
+    let metadata = match std::fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return CloneBytes::Absent,
+        Err(_) => return CloneBytes::Mismatch,
+    };
+    let id = if metadata.file_type().is_symlink() {
+        std::fs::read_link(path).and_then(|target| {
+            let target = link_target_bytes(&target);
+            blob_id(&mut target.as_slice(), target.len() as u64, object_hash)
+        })
+    } else if metadata.is_file() {
+        std::fs::File::open(path)
+            .and_then(|mut file| blob_id(&mut file, metadata.len(), object_hash))
+    } else {
+        return CloneBytes::Mismatch;
+    };
+    match id {
+        Ok(id) if id == planned.oid => CloneBytes::Match,
+        _ => CloneBytes::Mismatch,
+    }
+}
+
+/// The object id git gives a blob holding exactly `length` bytes read from `content`.
+/// Content shorter or longer than `length` is an error, since the header already named it.
+fn blob_id(
+    content: &mut dyn Read,
+    length: u64,
+    object_hash: gix_hash::Kind,
+) -> io::Result<gix_hash::ObjectId> {
+    let mut hasher = gix_hash::hasher(object_hash);
+    hasher.update(format!("blob {length}\0").as_bytes());
+    let mut buffer = vec![0u8; 64 * 1024];
+    let mut read = 0u64;
+    loop {
+        let count = content.read(&mut buffer)?;
+        if count == 0 {
+            break;
+        }
+        read += count as u64;
+        if read > length {
+            break;
+        }
+        hasher.update(&buffer[..count]);
+    }
+    if read != length {
+        return Err(io::Error::other(
+            "the content changed size while it was hashed",
+        ));
+    }
+    hasher.try_finalize().map_err(io::Error::other)
+}
+
+#[cfg(unix)]
+fn link_target_bytes(target: &Path) -> Vec<u8> {
+    use std::os::unix::ffi::OsStrExt;
+    target.as_os_str().as_bytes().to_vec()
+}
+
+#[cfg(not(unix))]
+fn link_target_bytes(target: &Path) -> Vec<u8> {
+    target.to_string_lossy().replace('\\', "/").into_bytes()
 }
 
 /// Materialises one path. A symlink in the source is recreated as a symlink; there are no
@@ -921,6 +1121,66 @@ fn umask() -> u32 {
 mod tests {
     use super::*;
     use std::ffi::OsStr;
+
+    fn hello_blob(object_hash: gix_hash::Kind) -> io::Result<gix_hash::ObjectId> {
+        blob_id(&mut b"hello\n".as_slice(), 6, object_hash)
+    }
+
+    #[test]
+    fn hashes_raw_bytes_the_way_git_hash_object_does() {
+        assert_eq!(
+            hello_blob(gix_hash::Kind::Sha1).unwrap().to_string(),
+            "ce013625030ba8dba906f756967f9e9ca394464a"
+        );
+        assert_eq!(
+            hello_blob(gix_hash::Kind::Sha256).unwrap().to_string(),
+            "2cf8d83d9ee29543b34a87727421fdecb7e3f3a183d337639025de576db9ebb4"
+        );
+    }
+
+    #[test]
+    fn content_of_another_length_than_the_header_is_an_error() {
+        assert!(blob_id(&mut b"hello\n".as_slice(), 5, gix_hash::Kind::Sha1).is_err());
+        assert!(blob_id(&mut b"hello\n".as_slice(), 7, gix_hash::Kind::Sha1).is_err());
+    }
+
+    #[test]
+    fn a_clone_holding_the_normalised_away_crlf_is_removed() {
+        let scratch =
+            std::env::temp_dir().join(format!("git-sprout-content-check-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&scratch);
+        std::fs::create_dir_all(scratch.join("src")).unwrap();
+        // Both files clean back to the blob of "hello\n"; only one is its bytes.
+        std::fs::write(scratch.join("src/lf.txt"), b"hello\n").unwrap();
+        std::fs::write(scratch.join("src/crlf.txt"), b"hello\r\n").unwrap();
+        let blob = hello_blob(gix_hash::Kind::Sha1).unwrap();
+        let planned = |path: &str| Planned {
+            path: path.as_bytes().to_vec(),
+            mode: 0o100644,
+            oid: blob,
+            mtime: gix_index::entry::stat::Time::default(),
+        };
+        let (lf, crlf, absent) = (
+            planned("src/lf.txt"),
+            planned("src/crlf.txt"),
+            planned("src/never-cloned.txt"),
+        );
+
+        let (content, rejected) =
+            reject_mismatched_clones(&scratch, &[&lf, &crlf, &absent], gix_hash::Kind::Sha1);
+
+        assert_eq!(
+            content,
+            ContentCheck {
+                checked: 2,
+                rejected: 1
+            }
+        );
+        assert_eq!(rejected, HashSet::from([b"src/crlf.txt".as_slice()]));
+        assert!(scratch.join("src/lf.txt").exists());
+        assert!(!scratch.join("src/crlf.txt").exists());
+        let _ = std::fs::remove_dir_all(&scratch);
+    }
 
     #[test]
     fn permissions_come_from_the_tree_and_the_umask() {

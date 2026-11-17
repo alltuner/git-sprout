@@ -64,6 +64,13 @@ pub fn entry_can_stand_in(target: &Blob, entry: &gix_index::Entry) -> bool {
 /// included — provided the attributes governing the path are the same on both sides.
 /// That last condition is checked separately, per subtree, by `poisoned_prefixes`.
 ///
+/// The stat cache settles a path on its own only where nothing converts in either
+/// direction (see `attributes::checkout`). A text path checked out with LF is written as
+/// the blob's own bytes, yet a stat-clean source file there only *cleans* back to the
+/// blob, so those clones are hashed raw after cloning and dropped if they differ. That
+/// hash is of the clone, with no filter applied, which is the comparison that is right
+/// for exactly those paths and wrong for every converting one.
+///
 /// # How far the stat cache is trusted
 ///
 /// Exactly as far as git trusts it, and no further:

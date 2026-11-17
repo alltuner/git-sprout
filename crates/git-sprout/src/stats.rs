@@ -36,6 +36,11 @@ pub struct Stats {
     pub skipped: usize,
     /// Paths in the target tree that git checked out itself. Zero when no plan ran.
     pub checked_out_by_git: usize,
+    /// Clones hashed against their blobs because adding the source file may have
+    /// normalised it, so the stat cache alone could not vouch for its bytes.
+    pub content_checked: usize,
+    /// Of those, the clones whose bytes were not the blob and were left for git to write.
+    pub content_rejected: usize,
     /// The checkout the clones came from.
     pub source: Option<PathBuf>,
     pub clone_backend: CloneBackend,
@@ -51,6 +56,8 @@ impl Default for Stats {
             cloned_directories: 0,
             skipped: 0,
             checked_out_by_git: 0,
+            content_checked: 0,
+            content_rejected: 0,
             source: None,
             clone_backend: CloneBackend::None,
             fell_back: false,
@@ -72,6 +79,8 @@ impl Stats {
             "cloned_directories": self.cloned_directories,
             "skipped": self.skipped,
             "checked_out_by_git": self.checked_out_by_git,
+            "content_checked": self.content_checked,
+            "content_rejected": self.content_rejected,
             "source": self.source.as_ref().map(|path| path.to_string_lossy()),
             "clone_backend": self.clone_backend.as_str(),
             "fell_back": self.fell_back,

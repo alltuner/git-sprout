@@ -174,6 +174,10 @@ pub fn same_rules(one: &[u8], other: &[u8]) -> bool {
     lines(one).eq(lines(other))
 }
 
+/// Whether git's `native` line ending, which is also what an unset `core.eol` means, is
+/// CRLF. It is in Git for Windows' build and LF everywhere else.
+const NATIVE_EOL_IS_CRLF: bool = cfg!(windows);
+
 /// The line-ending configuration in force for a worktree.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LineEndings {
@@ -184,6 +188,10 @@ pub struct LineEndings {
     /// `core.eol` is anything but unset, `lf` or `native`: `crlf`, which asks for CRLF in
     /// the working tree, or a value this does not know.
     pub crlf: bool,
+    /// A text path with no `eol` attribute of its own may be checked out with CRLF,
+    /// because `core.eol` says `crlf` or a value this does not know, or says `native` or
+    /// nothing where native is CRLF.
+    pub text_crlf: bool,
 }
 
 impl LineEndings {
@@ -197,14 +205,62 @@ impl LineEndings {
     /// value, including one git would reject, counts as converting, which leaves the path
     /// to git.
     pub fn from_config(autocrlf: Option<&str>, eol: Option<&str>) -> Self {
+        let eol = eol.map(str::to_ascii_lowercase);
+        let (crlf, text_crlf) = match eol.as_deref() {
+            None | Some("native") => (false, NATIVE_EOL_IS_CRLF),
+            Some("lf") => (false, false),
+            // `crlf`, or a value this does not know, which is left to git.
+            Some(_) => (true, true),
+        };
         LineEndings {
             autocrlf: !matches!(autocrlf, None | Some("false")),
-            crlf: !eol.is_none_or(|eol| {
-                ["lf", "native"]
-                    .iter()
-                    .any(|known| eol.eq_ignore_ascii_case(known))
-            }),
+            crlf,
+            text_crlf,
         }
+    }
+}
+
+/// How a checkout of one path relates to the blob it checks out.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Checkout {
+    /// Nothing converts in either direction, so a stat-clean source file is the blob's
+    /// bytes and the index stat cache settles the path on its own.
+    Verbatim,
+    /// A checkout writes the blob's bytes unchanged, but adding the file may normalise it:
+    /// a text path whose working-tree line ending is LF. A stat-clean source file there
+    /// only cleans back to the blob, so a clone of it stands in for a checkout only when
+    /// its raw bytes hash to the blob's id.
+    VerbatimIfBytesMatch,
+    /// A checkout rewrites the blob's bytes. Git writes the path.
+    Rewritten,
+}
+
+/// Classifies one path for the clone plan. See [`converts`] for why a conversion
+/// matters at all.
+///
+/// A text path whose checkout output is LF is the one converting case where a checkout
+/// still writes the blob verbatim: git only rewrites line endings on the way out when it
+/// writes CRLF. That needs every one of: no `ident`, no `filter`, no
+/// `working-tree-encoding`, an `eol` attribute that is unspecified, unset or `lf`, and a
+/// configuration known not to ask for CRLF (`core.autocrlf` unset or false, and
+/// `core.eol` unset, `lf`, or `native` where native is LF). `core.autocrlf=input` would
+/// also check out verbatim, but it is left to git with the rest of `core.autocrlf`.
+pub fn checkout(values: &HashMap<String, Value>, endings: LineEndings) -> Checkout {
+    if !converts(values, endings) {
+        return Checkout::Verbatim;
+    }
+    for name in ["ident", "filter", "working-tree-encoding"] {
+        if values.get(name).is_some_and(Value::applies) {
+            return Checkout::Rewritten;
+        }
+    }
+    if endings.autocrlf || endings.text_crlf {
+        return Checkout::Rewritten;
+    }
+    match values.get("eol").unwrap_or(&Value::Unspecified) {
+        Value::Unspecified | Value::Unset => Checkout::VerbatimIfBytesMatch,
+        Value::Named(eol) if eol == "lf" => Checkout::VerbatimIfBytesMatch,
+        _ => Checkout::Rewritten,
     }
 }
 
@@ -287,7 +343,161 @@ mod tests {
     const PLAIN: LineEndings = LineEndings {
         autocrlf: false,
         crlf: false,
+        text_crlf: false,
     };
+
+    fn lf_eol() -> Value {
+        Value::Named("lf".into())
+    }
+
+    #[test]
+    fn a_path_nothing_converts_is_settled_by_the_stat_cache() {
+        assert_eq!(checkout(&values(&[]), PLAIN), Checkout::Verbatim);
+        assert_eq!(
+            checkout(&values(&[("text", Value::Unset)]), PLAIN),
+            Checkout::Verbatim
+        );
+    }
+
+    #[test]
+    fn a_text_path_checked_out_with_lf_needs_its_bytes_compared() {
+        let auto = Value::Named("auto".into());
+        for attributes in [
+            values(&[("text", auto.clone()), ("eol", lf_eol())]),
+            values(&[("text", auto.clone())]),
+            values(&[("text", Value::Set)]),
+            values(&[("eol", lf_eol())]),
+            values(&[("text", Value::Set), ("eol", Value::Unset)]),
+        ] {
+            assert_eq!(
+                checkout(&attributes, PLAIN),
+                Checkout::VerbatimIfBytesMatch,
+                "{attributes:?}"
+            );
+        }
+    }
+
+    /// `crlf=unset` and `text=unset` are strings git ignores, so the path takes its line
+    /// ending from what follows; only a confirmed `-crlf` or `-text` makes it binary.
+    #[test]
+    fn an_unconfirmed_unset_does_not_make_a_path_binary() {
+        for name in ["crlf", "text"] {
+            let reported = values(&[(name, Value::Unset)]);
+            assert_eq!(
+                checkout(
+                    &resolve_ambiguous(&reported, NO_DRIVERS, |_| false),
+                    AUTOCRLF
+                ),
+                Checkout::Rewritten,
+                "{name}"
+            );
+            assert_eq!(
+                checkout(
+                    &resolve_ambiguous(&reported, NO_DRIVERS, |_| true),
+                    AUTOCRLF
+                ),
+                Checkout::Verbatim,
+                "{name}"
+            );
+            let with_lf = values(&[(name, Value::Unset), ("eol", lf_eol())]);
+            assert_eq!(
+                checkout(&resolve_ambiguous(&with_lf, NO_DRIVERS, |_| false), PLAIN),
+                Checkout::VerbatimIfBytesMatch,
+                "{name}"
+            );
+            assert_eq!(
+                checkout(&resolve_ambiguous(&with_lf, NO_DRIVERS, |_| true), PLAIN),
+                Checkout::Verbatim,
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_text_path_checked_out_with_crlf_is_left_to_git() {
+        let auto = Value::Named("auto".into());
+        let crlf = Value::Named("crlf".into());
+        assert_eq!(
+            checkout(
+                &values(&[("text", auto.clone()), ("eol", crlf.clone())]),
+                PLAIN
+            ),
+            Checkout::Rewritten
+        );
+        assert_eq!(
+            checkout(&values(&[("eol", crlf)]), PLAIN),
+            Checkout::Rewritten
+        );
+        // A bare `eol` names no line ending; git treats it as unset, but nothing here
+        // depends on guessing that, so it goes to git.
+        assert_eq!(
+            checkout(&values(&[("text", Value::Set), ("eol", Value::Set)]), PLAIN),
+            Checkout::Rewritten
+        );
+        let lf_attributes = values(&[("text", auto), ("eol", lf_eol())]);
+        for config in [
+            LineEndings::from_config(Some("true"), None),
+            LineEndings::from_config(Some("input"), None),
+            LineEndings::from_config(None, Some("crlf")),
+        ] {
+            assert_eq!(
+                checkout(&lf_attributes, config),
+                Checkout::Rewritten,
+                "{config:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn every_other_conversion_is_left_to_git() {
+        for name in ["ident", "filter", "working-tree-encoding"] {
+            let value = if name == "ident" {
+                Value::Set
+            } else {
+                Value::Named("x".into())
+            };
+            let attributes = values(&[
+                ("text", Value::Named("auto".into())),
+                ("eol", lf_eol()),
+                (name, value),
+            ]);
+            assert_eq!(checkout(&attributes, PLAIN), Checkout::Rewritten, "{name}");
+        }
+    }
+
+    #[test]
+    fn native_line_endings_follow_the_platform() {
+        let unset = LineEndings::from_config(None, None);
+        let native = LineEndings::from_config(None, Some("native"));
+        assert_eq!(unset.text_crlf, cfg!(windows));
+        assert_eq!(native.text_crlf, cfg!(windows));
+        assert!(!LineEndings::from_config(Some("false"), Some("lf")).text_crlf);
+        assert!(!LineEndings::from_config(None, Some("LF")).text_crlf);
+        for eol in ["crlf", "CRLF", "bogus"] {
+            assert!(
+                LineEndings::from_config(None, Some(eol)).text_crlf,
+                "core.eol={eol}"
+            );
+        }
+    }
+
+    /// Git compares core.eol without regard to case, and a value it does not define is
+    /// not guessed at: either way text is left to git rather than cloned.
+    #[test]
+    fn text_under_any_other_core_eol_is_left_to_git() {
+        let auto = values(&[("text", Value::Named("auto".into()))]);
+        for eol in ["CRLF", "Crlf", "bogus"] {
+            assert_eq!(
+                checkout(&auto, LineEndings::from_config(None, Some(eol))),
+                Checkout::Rewritten,
+                "core.eol={eol}"
+            );
+        }
+        assert_eq!(
+            checkout(&auto, LineEndings::from_config(None, Some("LF"))),
+            Checkout::VerbatimIfBytesMatch
+        );
+    }
 
     #[test]
     fn a_path_with_no_attributes_is_written_verbatim() {
@@ -312,10 +522,17 @@ mod tests {
 
     #[test]
     fn only_settings_known_to_leave_checkout_alone_are_plain() {
-        assert_eq!(LineEndings::from_config(None, None), PLAIN);
-        assert_eq!(LineEndings::from_config(Some("false"), Some("lf")), PLAIN);
-        assert_eq!(LineEndings::from_config(None, Some("LF")), PLAIN);
-        assert_eq!(LineEndings::from_config(None, Some("Native")), PLAIN);
+        // Where native is CRLF, an unset or `native` core.eol still makes text CRLF; that
+        // is `native_line_endings_follow_the_platform`'s business, not this test's.
+        for (autocrlf, eol) in [
+            (None, None),
+            (Some("false"), Some("lf")),
+            (None, Some("LF")),
+            (None, Some("Native")),
+        ] {
+            let endings = LineEndings::from_config(autocrlf, eol);
+            assert!(!endings.autocrlf && !endings.crlf, "{autocrlf:?} {eol:?}");
+        }
         for autocrlf in ["true", "input", "INPUT", "bogus", ""] {
             assert!(
                 LineEndings::from_config(Some(autocrlf), None).autocrlf,
@@ -348,6 +565,7 @@ mod tests {
     const AUTOCRLF: LineEndings = LineEndings {
         autocrlf: true,
         crlf: false,
+        text_crlf: false,
     };
 
     const NO_DRIVERS: FilterDrivers = FilterDrivers {
@@ -490,7 +708,8 @@ mod tests {
             &binary,
             LineEndings {
                 autocrlf: true,
-                crlf: true
+                crlf: true,
+                text_crlf: true,
             }
         ));
     }
@@ -501,7 +720,8 @@ mod tests {
             &values(&[]),
             LineEndings {
                 autocrlf: true,
-                crlf: false
+                crlf: false,
+                text_crlf: false,
             }
         ));
     }
