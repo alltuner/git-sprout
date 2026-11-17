@@ -159,3 +159,40 @@ impl Git {
         }
     }
 }
+
+/// Reads the contents `git cat-file --batch` writes for `count` requested objects, in the
+/// order they were asked for: `<oid> <type> <size>` on a line, the bytes, and a newline.
+/// `None` when the output is not that, or names an object git does not have.
+pub fn parse_cat_file_batch(output: &[u8], count: usize) -> Option<Vec<Vec<u8>>> {
+    let mut contents = Vec::with_capacity(count);
+    let mut rest = output;
+    for _ in 0..count {
+        let end = rest.iter().position(|byte| *byte == b'\n')?;
+        let header = std::str::from_utf8(&rest[..end]).ok()?;
+        let size: usize = header.split(' ').nth(2)?.parse().ok()?;
+        let body = rest.get(end + 1..end + 1 + size)?;
+        if rest.get(end + 1 + size) != Some(&b'\n') {
+            return None;
+        }
+        contents.push(body.to_vec());
+        rest = &rest[end + 2 + size..];
+    }
+    rest.is_empty().then_some(contents)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reads_the_objects_cat_file_batch_writes() {
+        let output = b"aa blob 3\none\nbb blob 0\n\n".as_slice();
+        assert_eq!(
+            parse_cat_file_batch(output, 2),
+            Some(vec![b"one".to_vec(), Vec::new()])
+        );
+        assert_eq!(parse_cat_file_batch(b"aa missing\n", 1), None);
+        assert_eq!(parse_cat_file_batch(b"aa blob 5\none\n", 1), None);
+        assert_eq!(parse_cat_file_batch(output, 1), None);
+    }
+}

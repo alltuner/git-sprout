@@ -162,16 +162,16 @@ pub fn ambiguous_to_confirm<T: PartialEq>(
     magic
 }
 
-/// Whether git would write this path to the working tree as something other than its
-/// blob in content, not merely in line endings: a filter, `ident`, or a
-/// `working-tree-encoding`.
-///
-/// An `Unset` or `Unspecified` here is taken as the state; [`resolve_ambiguous`] is what
-/// makes that so.
-pub fn rewrites_content(values: &HashMap<String, Value>) -> bool {
-    ["filter", "ident", "working-tree-encoding"]
-        .iter()
-        .any(|name| values.get(*name).is_some_and(Value::applies))
+/// Whether two versions of an attributes file hold the same rules as far as their bytes
+/// can tell: equal once CRLF is read as LF, which git's attribute parser does by taking CR
+/// for a blank.
+pub fn same_rules(one: &[u8], other: &[u8]) -> bool {
+    fn lines(bytes: &[u8]) -> impl Iterator<Item = &[u8]> {
+        bytes
+            .split(|byte| *byte == b'\n')
+            .map(|line| line.strip_suffix(b"\r").unwrap_or(line))
+    }
+    lines(one).eq(lines(other))
 }
 
 /// The line-ending configuration in force for a worktree.
@@ -402,35 +402,12 @@ mod tests {
         );
     }
 
-    /// An attributes file git filters, expands `ident` in or re-encodes can hold rules its
-    /// blob does not, and still be clean; line endings alone change no rule.
     #[test]
-    fn content_rewrites_are_told_from_line_ending_conversions() {
-        for rewriting in [
-            values(&[("filter", Value::Named("rules".into()))]),
-            values(&[("ident", Value::Set)]),
-            values(&[("working-tree-encoding", Value::Named("UTF-16".into()))]),
-        ] {
-            assert!(rewrites_content(&rewriting), "{rewriting:?}");
-        }
-        let line_endings = values(&[
-            ("text", Value::Set),
-            ("eol", Value::Named("crlf".into())),
-            ("filter", Value::Unset),
-            ("ident", Value::Unset),
-        ]);
-        assert!(!rewrites_content(&line_endings));
-        // Unconfirmed, `filter=unset` names a driver where one by that name is configured.
-        assert!(rewrites_content(&resolve_ambiguous(
-            &line_endings,
-            BOTH_DRIVERS,
-            |_| false
-        )));
-        assert!(!rewrites_content(&resolve_ambiguous(
-            &line_endings,
-            BOTH_DRIVERS,
-            |magic| magic == "-filter"
-        )));
+    fn line_endings_alone_change_no_rule() {
+        assert!(same_rules(b"*.txt text\n", b"*.txt text\r\n"));
+        assert!(same_rules(b"a\r\nb", b"a\nb"));
+        assert!(!same_rules(b"*.txt text\n", b"*.txt -crlf\n"));
+        assert!(!same_rules(b"*.txt text\n", b"*.txt text\n\n"));
     }
 
     #[test]

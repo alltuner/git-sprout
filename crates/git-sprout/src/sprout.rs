@@ -294,7 +294,7 @@ fn populate(git: &Git, destination: &Path, before: &[source::Worktree], stats: &
             .into_iter()
             .collect();
     dirty_attributes.extend(source_attributes.untrusted);
-    dirty_attributes.extend(rewritten_attribute_files(
+    dirty_attributes.extend(attribute_files_unlike_their_blobs(
         git,
         &source,
         &source_attributes.recorded,
@@ -446,15 +446,16 @@ fn worktree_attributes(git: &Git, worktree: &Path) -> Option<Vec<u8>> {
     std::fs::read(path).ok()
 }
 
-/// The source's attributes files whose working copy git writes as other content than
-/// their blob, through a filter, `ident` or a `working-tree-encoding`.
+/// The source's attributes files whose working copy holds other rules than their blob.
 ///
-/// Git reads the rules from the working copy, while the stat cache and `git diff-files`
-/// compare it with the blob only after cleaning it, so such a file can hold rules its blob
-/// does not and still be clean. A filter word `git check-attr` shares with a state is
-/// confirmed the way [`drop_converted_paths`] confirms it. A git that cannot answer is
-/// taken to rewrite them all.
-fn rewritten_attribute_files(
+/// Git reads the rules from the working copy. The stat cache, `git diff-files` and the
+/// index flags vouch only for what that copy cleans back to under whatever filter applies
+/// now, so a copy staged through a filter, or one whose filter has since been switched
+/// off, can hold rules its blob does not and still be clean. Each copy is therefore
+/// compared with its blob byte for byte, with CRLF read as LF. A missing copy is alike,
+/// since git then reads the index; one that is not a regular file or cannot be read is
+/// not, and neither is any when git cannot supply the blobs.
+fn attribute_files_unlike_their_blobs(
     git: &Git,
     source: &Path,
     files: &std::collections::BTreeMap<Vec<u8>, gix_hash::ObjectId>,
@@ -463,46 +464,31 @@ fn rewritten_attribute_files(
         return Vec::new();
     }
     let mut request = Vec::new();
-    for path in files.keys() {
-        request.extend_from_slice(path);
-        request.push(0);
+    for oid in files.values() {
+        request.extend_from_slice(oid.to_string().as_bytes());
+        request.push(b'\n');
     }
-    let arguments = [
-        "check-attr",
-        "-z",
-        "--stdin",
-        "filter",
-        "ident",
-        "working-tree-encoding",
-    ];
-    let Ok(output) = git.capture_with_input(Some(source), arguments, &request) else {
+    let Some(blobs) = git
+        .capture_with_input(Some(source), ["cat-file", "--batch"], &request)
+        .ok()
+        .and_then(|output| crate::git::parse_cat_file_batch(&output, files.len()))
+    else {
         return files.keys().cloned().collect();
     };
-    let reported = attributes::parse_check_attr(&output);
-    let drivers = filter_drivers(git, source);
-    let decide = |values: &HashMap<String, Value>| attributes::rewrites_content(values);
-    let confirmed = confirm_states(
-        git,
-        source,
-        files.keys().map(Vec::as_slice),
-        &reported,
-        drivers,
-        decide,
-    );
     files
         .keys()
-        .filter(|path| {
-            let Some(values) = reported.get(*path) else {
-                return true;
-            };
-            let values = attributes::resolve_ambiguous(values, drivers, |magic| {
-                confirmed
-                    .get(magic)
-                    .is_some_and(|matched| matched.contains(*path))
-            });
-            decide(&values)
+        .zip(blobs)
+        .filter(|(path, blob)| {
+            let copy = source.join(as_path(path));
+            match std::fs::symlink_metadata(&copy) {
+                Err(error) => error.kind() != io::ErrorKind::NotFound,
+                Ok(metadata) if metadata.is_file() => {
+                    std::fs::read(&copy).map_or(true, |bytes| !attributes::same_rules(&bytes, blob))
+                }
+                Ok(_) => true,
+            }
         })
-        .cloned()
+        .map(|(path, _)| path.clone())
         .collect()
 }
 
@@ -1115,6 +1101,81 @@ mod tests {
             Some("attr.tree names a tree to read attributes from".to_string()),
         );
         let _ = std::fs::remove_dir_all(&scratch);
+    }
+
+    /// Git reads an attributes file's rules from its working copy, and nothing the index
+    /// keeps vouches for that copy's raw bytes: one staged through a clean filter that has
+    /// since been switched off is clean to git and holds other rules than its blob. A copy
+    /// that differs only in line endings holds the same rules, since git's attribute parser
+    /// takes CR for a blank, and git reads a missing copy from the index.
+    #[test]
+    fn attributes_files_unlike_their_blobs_are_reported() {
+        let repo = std::env::temp_dir().join(format!(
+            "git-sprout-unlike-attributes-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&repo);
+        let git = Git::new(Vec::new());
+        git.capture(
+            None,
+            [OsStr::new("init"), OsStr::new("-q"), repo.as_os_str()],
+        )
+        .expect("git init");
+        for (directory, rules) in [
+            ("filtered", "*.txt text\n.gitattributes filter=rules\n"),
+            ("crlf", "*.txt text\n"),
+            ("gone", "*.txt text\n"),
+            ("same", "*.txt -text\n"),
+        ] {
+            std::fs::create_dir_all(repo.join(directory)).expect("mkdir");
+            std::fs::write(repo.join(directory).join(".gitattributes"), rules).expect("write");
+        }
+        for args in [
+            &["config", "filter.rules.clean", "sed s/-crlf/text/g"][..],
+            &["add", "--", "."],
+            &[
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@example.invalid",
+                "commit",
+                "-q",
+                "--no-gpg-sign",
+                "-m",
+                "base",
+            ],
+        ] {
+            git.capture(Some(&repo), args).expect("git");
+        }
+        std::fs::write(
+            repo.join("filtered/.gitattributes"),
+            "*.txt -crlf\n.gitattributes filter=rules\n",
+        )
+        .expect("write");
+        git.capture(Some(&repo), ["add", "--", "filtered/.gitattributes"])
+            .expect("git add");
+        std::fs::write(
+            repo.join(".git/info/attributes"),
+            "filtered/.gitattributes -filter\n",
+        )
+        .expect("write info/attributes");
+        std::fs::write(repo.join("crlf/.gitattributes"), "*.txt text\r\n").expect("write");
+        std::fs::remove_file(repo.join("gone/.gitattributes")).expect("remove");
+        let index = gix_index::File::at(
+            repo.join(".git").join("index"),
+            gix_hash::Kind::Sha1,
+            true,
+            gix_index::decode::Options::default(),
+        )
+        .expect("read index");
+        let recorded = plan::source_attribute_files(&index, &repo).recorded;
+        assert_eq!(recorded.len(), 4);
+
+        assert_eq!(
+            attribute_files_unlike_their_blobs(&git, &repo, &recorded),
+            vec![b"filtered/.gitattributes".to_vec()]
+        );
+        let _ = std::fs::remove_dir_all(&repo);
     }
 
     /// `GIT_ATTR_SOURCE`, which `git --attr-source` also sets, names a tree-ish to read
