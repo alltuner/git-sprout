@@ -393,10 +393,10 @@ fn drop_converted_paths(git: &Git, source: &Path, paths: &mut Vec<Planned>) {
     if paths.is_empty() {
         return;
     }
-    let endings = LineEndings::from_config(
-        git.config(source, "core.autocrlf").as_deref(),
-        git.config(source, "core.eol").as_deref(),
-    );
+    let Ok(endings) = line_endings(git, source) else {
+        paths.clear();
+        return;
+    };
     let mut request = Vec::new();
     for planned in paths.iter() {
         request.extend_from_slice(&planned.path);
@@ -413,6 +413,20 @@ fn drop_converted_paths(git: &Git, source: &Path, paths: &mut Vec<Planned>) {
         Some(values) => !attributes::converts(values, endings),
         None => false,
     });
+}
+
+/// The line-ending options as git reads them. `core.autocrlf` is a boolean or `input`,
+/// and git accepts every boolean spelling for it, so git canonicalises it here rather than
+/// this matching one spelling. `core.eol` goes through the same reading, which leaves
+/// `lf`, `crlf` and `native` as written. An option git cannot be asked about is an
+/// error, and the caller then clones nothing it would have to judge.
+fn line_endings(git: &Git, source: &Path) -> io::Result<LineEndings> {
+    let autocrlf = git.config_typed(source, "bool-or-str", "core.autocrlf")?;
+    let eol = git.config_typed(source, "bool-or-str", "core.eol")?;
+    Ok(LineEndings::from_config(
+        autocrlf.as_deref(),
+        eol.as_deref(),
+    ))
 }
 
 /// Asks git which of these paths really differ from what the index records.
@@ -642,6 +656,7 @@ fn umask() -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::ffi::OsStr;
 
     #[test]
     fn permissions_come_from_the_tree_and_the_umask() {
@@ -651,6 +666,62 @@ mod tests {
         assert_eq!(checkout_mode(0o100755, 0o077), 0o700);
         assert_eq!(checkout_mode(0o100644, 0o000), 0o666);
         assert_eq!(directory_mode(0o022), 0o755);
+    }
+
+    /// Git reads `core.autocrlf` as a boolean and `core.eol` without regard to case, so
+    /// every spelling it accepts has to reach the plan as what it means, or a path is
+    /// cloned with LF where a checkout writes CRLF. Real git does the reading here, because
+    /// the reading is git's to make.
+    #[test]
+    fn line_endings_read_every_spelling_git_accepts() {
+        let repo =
+            std::env::temp_dir().join(format!("git-sprout-line-endings-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&repo);
+        let git = Git::new(Vec::new());
+        git.capture(
+            None,
+            [OsStr::new("init"), OsStr::new("-q"), repo.as_os_str()],
+        )
+        .expect("git init");
+        let read = |autocrlf: Option<&str>, eol: Option<&str>| {
+            for (key, value) in [("core.autocrlf", autocrlf), ("core.eol", eol)] {
+                let _ = git.capture(Some(&repo), ["config", "--unset-all", key]);
+                if let Some(value) = value {
+                    git.capture(Some(&repo), ["config", key, value])
+                        .expect("git config");
+                }
+            }
+            line_endings(&git, &repo).expect("git answers")
+        };
+
+        for spelling in ["true", "yes", "on", "1", "TRUE", "input", "INPUT"] {
+            assert!(
+                read(Some(spelling), None).autocrlf,
+                "core.autocrlf={spelling}"
+            );
+        }
+        for spelling in ["false", "no", "off", "0", "FALSE", ""] {
+            assert!(
+                !read(Some(spelling), None).autocrlf,
+                "core.autocrlf={spelling}"
+            );
+        }
+        for spelling in ["crlf", "CRLF", "bogus"] {
+            assert!(read(None, Some(spelling)).crlf, "core.eol={spelling}");
+        }
+        for spelling in ["lf", "LF", "native", "Native"] {
+            assert!(!read(None, Some(spelling)).crlf, "core.eol={spelling}");
+        }
+
+        // A key with no value at all is `true` to git.
+        let _ = git.capture(Some(&repo), ["config", "--unset-all", "core.autocrlf"]);
+        let config = repo.join(".git").join("config");
+        let mut text = std::fs::read_to_string(&config).expect("read config");
+        text.push_str("[core]\n\tautocrlf\n");
+        std::fs::write(&config, text).expect("write config");
+        assert!(line_endings(&git, &repo).expect("git answers").autocrlf);
+
+        let _ = std::fs::remove_dir_all(&repo);
     }
 
     #[test]

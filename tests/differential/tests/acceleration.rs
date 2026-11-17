@@ -20,10 +20,20 @@ const ACCELERATED: &[&str] = &["text-heavy"];
 /// and a converting repository accelerates nothing. That cost was weighed and
 /// accepted rather than overlooked, and the documentation states it.
 ///
+/// The `autocrlf-*` fixtures spell `core.autocrlf=true` the other ways git accepts it
+/// (`yes`, `on`, `1`, `TRUE`, a key with no value), so they must clone nothing either.
+///
 /// So this asserts the decision holds. If a future change starts cloning converted
 /// paths, that is a correctness regression and this test is what catches it — do not
 /// "fix" it by moving the fixture back into ACCELERATED.
-const NOT_ACCELERATED: &[&str] = &["autocrlf"];
+const NOT_ACCELERATED: &[&str] = &[
+    "autocrlf",
+    "autocrlf-yes",
+    "autocrlf-on",
+    "autocrlf-one",
+    "autocrlf-upper",
+    "autocrlf-valueless",
+];
 
 #[test]
 fn the_fast_path_is_taken_where_the_fixture_exists_to_prove_it() {
