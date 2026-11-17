@@ -12,7 +12,7 @@ use gix_index::entry::Stat;
 use gix_index::fs::Metadata;
 
 use crate::argv::AddCommand;
-use crate::attributes::{self, LineEndings, Value};
+use crate::attributes::{self, FilterDrivers, LineEndings, Value};
 use crate::clone::{self, BlockCloner};
 use crate::delegate;
 use crate::git::Git;
@@ -410,44 +410,60 @@ fn drop_converted_paths(git: &Git, source: &Path, paths: &mut Vec<Planned>) {
     };
     let reported = attributes::parse_check_attr(&output);
     let decide = |values: &HashMap<String, Value>| attributes::converts(values, endings);
-    let confirmed = confirm_unsets(git, source, paths, &reported, decide);
+    let drivers = filter_drivers(git, source);
+    let confirmed = confirm_states(git, source, paths, &reported, drivers, decide);
     paths.retain(|planned| {
         let Some(values) = reported.get(&planned.path) else {
             return false;
         };
-        let values = attributes::resolve_unsets(values, |name| {
+        let values = attributes::resolve_ambiguous(values, drivers, |magic| {
             confirmed
-                .get(name)
-                .is_some_and(|unset| unset.contains(&planned.path))
+                .get(magic)
+                .is_some_and(|matched| matched.contains(&planned.path))
         });
         !decide(&values)
     });
 }
 
-/// For each attribute some path reports as an ambiguous `unset` that `decide` depends on,
-/// the paths git matches as `-name`.
+/// Which of the words `git check-attr` prints for a state name a configured filter
+/// driver. A git that cannot answer is taken to have both, which leaves every such state to
+/// be confirmed.
+fn filter_drivers(git: &Git, source: &Path) -> FilterDrivers {
+    match git.config_names(source, r"^filter\.(unset|unspecified)\.") {
+        Ok(names) => FilterDrivers::from_config_names(names.iter().map(String::as_str)),
+        Err(_) => FilterDrivers {
+            unset: true,
+            unspecified: true,
+        },
+    }
+}
+
+/// For each ambiguous state some path reports that `decide` depends on, the paths git
+/// matches with the `attr` pathspec magic for it.
 ///
 /// `git check-attr` prints `unset` both for `-name` and for the string value `unset`,
-/// which git reads differently, but the `attr` pathspec magic tells them apart:
-/// `:(attr:-name)` matches only the first. A git that cannot answer confirms nothing, and
-/// every such `unset` is then read as the string.
-fn confirm_unsets(
+/// and `unspecified` both for no setting and for the string `unspecified`, which git can
+/// read differently. The pathspec magic tells them apart: `:(attr:-name)` matches only
+/// `-name`, and `:(attr:!name)` only no setting. A git that cannot answer confirms
+/// nothing, and every such state is then read as the string.
+fn confirm_states(
     git: &Git,
     source: &Path,
     paths: &[Planned],
     reported: &HashMap<Vec<u8>, HashMap<String, Value>>,
+    drivers: FilterDrivers,
     decide: impl Fn(&HashMap<String, Value>) -> bool + Copy,
 ) -> HashMap<String, HashSet<Vec<u8>>> {
-    let names: BTreeSet<String> = paths
+    let magic: BTreeSet<String> = paths
         .iter()
         .filter_map(|planned| reported.get(&planned.path))
-        .flat_map(|values| attributes::unsets_to_confirm(values, decide))
+        .flat_map(|values| attributes::ambiguous_to_confirm(values, drivers, decide))
         .collect();
-    names
+    magic
         .into_iter()
-        .map(|name| {
-            let pathspec = format!(":(attr:-{name})");
-            let unset = git
+        .map(|magic| {
+            let pathspec = format!(":(attr:{magic})");
+            let matched = git
                 .capture(Some(source), ["ls-files", "-z", "--", &pathspec])
                 .map(|output| {
                     output
@@ -457,7 +473,7 @@ fn confirm_unsets(
                         .collect()
                 })
                 .unwrap_or_default();
-            (name, unset)
+            (magic, matched)
         })
         .collect()
 }
@@ -774,8 +790,9 @@ mod tests {
     /// `git check-attr` prints `unset` both for `-crlf` and for the string value
     /// `crlf=unset`, and the same for `text`. Git ignores the string and applies
     /// core.autocrlf, which writes CRLF, so only a genuine `-crlf` or `-text` may keep a
-    /// path out of git's hands. Real git does the reading here, because the reading is
-    /// git's to make.
+    /// path out of git's hands. It prints `unspecified` both for no `filter` and for
+    /// `filter=unspecified`, which names a configured driver. Real git does the reading
+    /// here, because the reading is git's to make.
     #[test]
     fn only_a_genuine_unset_keeps_a_path_from_core_autocrlf() {
         let repo =
@@ -795,7 +812,8 @@ mod tests {
              *.text-unset -text\n\
              *.text-string-crlf-unset text=unset -crlf\n\
              *.text-unset-crlf-string -text crlf=unset\n\
-             *.both-string text=unset crlf=unset\n",
+             *.both-string text=unset crlf=unset\n\
+             *.filter-string -crlf filter=unspecified\n",
         )
         .expect("write attributes");
         let names = [
@@ -806,6 +824,7 @@ mod tests {
             "a.text-string-crlf-unset",
             "a.text-unset-crlf-string",
             "a.both-string",
+            "a.filter-string",
         ];
         for name in names {
             std::fs::write(repo.join(name), "one\ntwo\n").expect("write file");
@@ -813,6 +832,9 @@ mod tests {
         git.capture(Some(&repo), ["add", "--", "."])
             .expect("git add");
         git.capture(Some(&repo), ["config", "core.autocrlf", "true"])
+            .expect("git config");
+        // A driver named `unspecified`, which `filter=unspecified` names as a string.
+        git.capture(Some(&repo), ["config", "filter.unspecified.smudge", "cat"])
             .expect("git config");
         let mut paths: Vec<Planned> = names
             .iter()

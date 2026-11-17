@@ -18,7 +18,7 @@ fixture_tests! {
     plain => "plain",
     attrs_eol_crlf => "attrs-eol-crlf",
     attrs_crlf => "attrs-crlf",
-    attrs_unset_string => "attrs-unset-string",
+    attrs_reserved_values => "attrs-reserved-values",
     attrs_ident => "attrs-ident",
     attrs_utf16 => "attrs-utf16",
     attrs_filter => "attrs-filter",

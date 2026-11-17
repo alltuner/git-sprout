@@ -136,4 +136,26 @@ impl Git {
             _ => Err(io::Error::other("git config could not read the value")),
         }
     }
+
+    /// The names of the configuration keys matching `regexp`, as
+    /// `git config --name-only --get-regexp` prints them. No key matching is `Ok` and
+    /// empty, told apart from a git that could not answer.
+    pub fn config_names(&self, directory: &Path, regexp: &str) -> io::Result<Vec<String>> {
+        let output = self
+            .command(Some(directory))
+            .args(["config", "--name-only", "--get-regexp", regexp])
+            .stdin(Stdio::null())
+            .stderr(Stdio::null())
+            .output()?;
+        match output.status.code() {
+            // `git config --get-regexp` exits 1, and prints nothing, when no key matches.
+            Some(1) => Ok(Vec::new()),
+            Some(0) => {
+                let text = String::from_utf8(output.stdout)
+                    .map_err(|_| io::Error::other("git printed non-UTF-8"))?;
+                Ok(text.lines().map(str::to_string).collect())
+            }
+            _ => Err(io::Error::other("git config could not read the keys")),
+        }
+    }
 }

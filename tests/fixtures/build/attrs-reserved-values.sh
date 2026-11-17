@@ -1,10 +1,18 @@
 #!/bin/sh
-# ABOUTME: `crlf` and `text` given the string value `unset`, which git ignores and so
-# ABOUTME: applies core.autocrlf, beside genuine `-crlf` and `-text`, which it honours.
+# ABOUTME: Attribute values spelled like the states `git check-attr` prints, `unset` and
+# ABOUTME: `unspecified`, which git reads as strings, beside the genuine states.
 . "$(dirname "$0")/../lib.sh"
 
 init_repo
-printf '*.txt crlf=unset\n*.md text=unset\n*.bin -crlf\n*.dat -text\n' > "$REPO/.gitattributes"
+printf '%s\n' \
+    '*.txt crlf=unset' \
+    '*.md text=unset' \
+    '*.bin -crlf' \
+    '*.dat -text' \
+    '*.up -crlf filter=unspecified' > "$REPO/.gitattributes"
+# A filter driver named `unspecified`, which `filter=unspecified` names as a string.
+g config filter.unspecified.clean "sed s/SMUDGED/BLOB/"
+g config filter.unspecified.smudge "sed s/BLOB/SMUDGED/"
 base_history
 write_text_tree "src" 12 8 2
 write_text "docs/guide.md" 6
@@ -13,6 +21,8 @@ write_text "docs/guide.md" 6
 write_text "assets/notes.bin" 5
 write_text "assets/notes.dat" 5
 write_binary "assets/blob.bin" 4
+# Cleaning leaves it as it is, so the stat cache calls it clean, but a checkout smudges it.
+printf 'value BLOB here\n' > "$REPO/assets/marked.up"
 commit "lf tree"
 finish_repo
 

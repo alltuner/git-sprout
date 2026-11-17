@@ -38,58 +38,120 @@ impl Value {
     }
 }
 
-/// What git makes of the string value `unset` for an attribute, where that is not what it
-/// makes of `-name`.
+/// Which of the words `git check-attr` prints for a state name a configured filter driver.
 ///
-/// `git check-attr` prints `unset` for both, so its output cannot tell them apart.
-/// `text` and its deprecated spelling `crlf` ignore a value they do not know and fall
-/// through to the next source, `crlf` and then the configuration, as an unspecified
-/// attribute does. `filter` and `working-tree-encoding` take the string as the name of a
-/// driver or an encoding. `eol` and `ident` read it as they read `-name`.
-fn unset_as_string(name: &str) -> Option<Value> {
-    match name {
-        "text" | "crlf" => Some(Value::Unspecified),
-        "filter" | "working-tree-encoding" => Some(Value::Named("unset".into())),
+/// `filter` takes any string as the name of a driver, so `filter=unset` and
+/// `filter=unspecified` filter the path where a driver by that name exists, and are no
+/// filter at all where none does.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct FilterDrivers {
+    pub unset: bool,
+    pub unspecified: bool,
+}
+
+impl FilterDrivers {
+    /// Reads the `filter.<driver>.<key>` names the configuration holds.
+    pub fn from_config_names<'a>(names: impl IntoIterator<Item = &'a str>) -> Self {
+        let mut drivers = FilterDrivers::default();
+        for name in names {
+            match name
+                .strip_prefix("filter.")
+                .and_then(|rest| rest.rsplit_once('.'))
+            {
+                Some(("unset", _)) => drivers.unset = true,
+                Some(("unspecified", _)) => drivers.unspecified = true,
+                _ => {}
+            }
+        }
+        drivers
+    }
+
+    fn names(self, word: &str) -> bool {
+        match word {
+            "unset" => self.unset,
+            "unspecified" => self.unspecified,
+            _ => false,
+        }
+    }
+}
+
+/// `git check-attr` prints two states as words a string value can spell too: `unset` is
+/// `-name` or `name=unset`, and `unspecified` is no setting or `name=unspecified`, so its
+/// output cannot tell them apart. This is the word, and the `attr` pathspec magic prefix
+/// that matches only the state: `:(attr:-name)` and `:(attr:!name)`.
+fn state_word(value: &Value) -> Option<(&'static str, char)> {
+    match value {
+        Value::Unset => Some(("unset", '-')),
+        Value::Unspecified => Some(("unspecified", '!')),
         _ => None,
     }
 }
 
-/// The path's attributes with every ambiguous `unset` that `confirmed` does not vouch for
-/// read as the string value `unset`, which is what git makes of it then. `confirmed` is
-/// asked by attribute name whether git matched the path as `-name`.
-pub fn resolve_unsets(
-    values: &HashMap<String, Value>,
-    confirmed: impl Fn(&str) -> bool,
-) -> HashMap<String, Value> {
-    values
-        .iter()
-        .map(|(name, value)| {
-            let read = match unset_as_string(name) {
-                Some(string) if value == &Value::Unset && !confirmed(name) => string,
-                _ => value.clone(),
-            };
-            (name.clone(), read)
-        })
-        .collect()
+/// What git makes of the string value for attribute `name` that `check-attr` spells as
+/// `value`, where that differs from what it makes of the state.
+///
+/// `text` and its deprecated spelling `crlf` ignore a value they do not know and fall
+/// through to the next source, `crlf` and then the configuration, as an unspecified
+/// attribute does, which is not what `-text` means. `filter` takes the word as the name
+/// of a driver, which matters only where one by that name is configured. Every other
+/// reading is the state's own: `eol` and `ident` ignore a value they do not know, and a
+/// `working-tree-encoding` git cannot convert to is reported and the bytes left alone.
+fn string_reading(name: &str, value: &Value, drivers: FilterDrivers) -> Option<Value> {
+    let (word, _) = state_word(value)?;
+    match name {
+        "text" | "crlf" if *value == Value::Unset => Some(Value::Unspecified),
+        "filter" if drivers.names(word) => Some(Value::Named(word.to_string())),
+        _ => None,
+    }
 }
 
-/// The attributes reported as `unset` on this path that git has to confirm as `-name`
-/// before `decide` may rely on them: the ambiguous ones, when reading every one of them as
-/// the string value `unset` changes the answer. Empty when the two readings agree, in
-/// which case the answer stands either way.
-pub fn unsets_to_confirm<T: PartialEq>(
+/// The ambiguous readings on one path, each as the `attr` pathspec magic (`-text`,
+/// `!filter`) that matches the path only where git holds the state.
+fn ambiguous(
     values: &HashMap<String, Value>,
+    drivers: FilterDrivers,
+) -> impl Iterator<Item = (&String, String, Value)> {
+    values.iter().filter_map(move |(name, value)| {
+        let string = string_reading(name, value, drivers)?;
+        let (_, magic) = state_word(value)?;
+        Some((name, format!("{magic}{name}"), string))
+    })
+}
+
+/// The path's attributes with every ambiguous state that `confirmed` does not vouch for
+/// read as the string value, which is what git makes of it then. `confirmed` is asked
+/// with the `attr` pathspec magic, `-text` or `!filter`, whether git matched the path.
+pub fn resolve_ambiguous(
+    values: &HashMap<String, Value>,
+    drivers: FilterDrivers,
+    confirmed: impl Fn(&str) -> bool,
+) -> HashMap<String, Value> {
+    let mut resolved = values.clone();
+    for (name, magic, string) in ambiguous(values, drivers) {
+        if !confirmed(&magic) {
+            resolved.insert(name.clone(), string);
+        }
+    }
+    resolved
+}
+
+/// The ambiguous states on this path that git has to confirm before `decide` may rely
+/// on them, as the `attr` pathspec magic that matches each: all of them when reading
+/// every one as its string value changes the answer, and none when the two readings
+/// agree, in which case the answer stands either way.
+pub fn ambiguous_to_confirm<T: PartialEq>(
+    values: &HashMap<String, Value>,
+    drivers: FilterDrivers,
     decide: impl Fn(&HashMap<String, Value>) -> T,
 ) -> Vec<String> {
-    let ambiguous: Vec<String> = values
-        .iter()
-        .filter(|(name, value)| **value == Value::Unset && unset_as_string(name).is_some())
-        .map(|(name, _)| name.clone())
+    let magic: Vec<String> = ambiguous(values, drivers)
+        .map(|(_, magic, _)| magic)
         .collect();
-    if ambiguous.is_empty() || decide(values) == decide(&resolve_unsets(values, |_| false)) {
+    if magic.is_empty() || decide(values) == decide(&resolve_ambiguous(values, drivers, |_| false))
+    {
         return Vec::new();
     }
-    ambiguous
+    magic
 }
 
 /// The line-ending configuration in force for a worktree.
@@ -136,7 +198,8 @@ impl LineEndings {
 /// as "LF will be replaced by CRLF the next time Git touches it". Such a path is left to
 /// git, which writes the converted form.
 ///
-/// An `Unset` here is taken as `-name`; [`resolve_unsets`] is what makes that so.
+/// An `Unset` or `Unspecified` here is taken as the state; [`resolve_ambiguous`] is what
+/// makes that so.
 pub fn converts(values: &HashMap<String, Value>, endings: LineEndings) -> bool {
     for name in ["ident", "filter", "working-tree-encoding"] {
         if values.get(name).is_some_and(Value::applies) {
@@ -261,6 +324,15 @@ mod tests {
         crlf: false,
     };
 
+    const NO_DRIVERS: FilterDrivers = FilterDrivers {
+        unset: false,
+        unspecified: false,
+    };
+    const BOTH_DRIVERS: FilterDrivers = FilterDrivers {
+        unset: true,
+        unspecified: true,
+    };
+
     /// `git check-attr` prints `unset` both for `-crlf` and for `crlf=unset`. Git ignores
     /// the string and applies core.autocrlf, so until git confirms `-crlf` the path is
     /// read as having no `crlf` at all. The same holds for `text`.
@@ -268,56 +340,101 @@ mod tests {
     fn an_unconfirmed_unset_is_read_as_the_string_git_ignores() {
         for name in ["crlf", "text"] {
             let reported = values(&[(name, Value::Unset)]);
-            let unconfirmed = resolve_unsets(&reported, |_| false);
+            let unconfirmed = resolve_ambiguous(&reported, NO_DRIVERS, |_| false);
             assert_eq!(unconfirmed[name], Value::Unspecified, "{name}");
             assert!(converts(&unconfirmed, AUTOCRLF), "{name}");
-            let confirmed = resolve_unsets(&reported, |confirmed| confirmed == name);
+            let magic = format!("-{name}");
+            let confirmed = resolve_ambiguous(&reported, NO_DRIVERS, |asked| asked == magic);
             assert_eq!(confirmed[name], Value::Unset, "{name}");
             assert!(!converts(&confirmed, AUTOCRLF), "{name}");
         }
     }
 
+    /// `filter=unset` and `filter=unspecified` name a driver, which filters the path
+    /// only where one by that name is configured.
     #[test]
-    fn a_string_unset_filter_or_encoding_names_a_driver() {
-        for name in ["filter", "working-tree-encoding"] {
-            let reported = values(&[(name, Value::Unset)]);
-            assert!(
-                converts(&resolve_unsets(&reported, |_| false), PLAIN),
-                "{name}"
+    fn a_filter_word_names_a_driver_only_where_one_is_configured() {
+        for (state, magic) in [(Value::Unset, "-filter"), (Value::Unspecified, "!filter")] {
+            let reported = values(&[("filter", state.clone())]);
+            assert_eq!(
+                resolve_ambiguous(&reported, NO_DRIVERS, |_| false),
+                reported
             );
-            assert!(
-                !converts(&resolve_unsets(&reported, |_| true), PLAIN),
-                "{name}"
-            );
+            let unconfirmed = resolve_ambiguous(&reported, BOTH_DRIVERS, |_| false);
+            assert!(converts(&unconfirmed, PLAIN), "{magic}");
+            let confirmed = resolve_ambiguous(&reported, BOTH_DRIVERS, |asked| asked == magic);
+            assert_eq!(confirmed, reported, "{magic}");
         }
     }
 
     #[test]
-    fn eol_and_ident_read_the_string_as_unset() {
-        let reported = values(&[("eol", Value::Unset), ("ident", Value::Unset)]);
-        assert_eq!(resolve_unsets(&reported, |_| false), reported);
-        assert!(unsets_to_confirm(&reported, |values| converts(values, AUTOCRLF)).is_empty());
+    fn other_attributes_read_the_word_as_the_state() {
+        let reported = values(&[
+            ("eol", Value::Unset),
+            ("ident", Value::Unset),
+            ("working-tree-encoding", Value::Unset),
+            ("text", Value::Unspecified),
+            ("crlf", Value::Unspecified),
+        ]);
+        assert_eq!(
+            resolve_ambiguous(&reported, BOTH_DRIVERS, |_| false),
+            reported
+        );
+    }
+
+    #[test]
+    fn reads_the_configured_filter_drivers() {
+        assert_eq!(
+            FilterDrivers::from_config_names(["filter.lfs.clean", "core.autocrlf"]),
+            NO_DRIVERS
+        );
+        assert_eq!(
+            FilterDrivers::from_config_names(["filter.unset.smudge"]),
+            FilterDrivers {
+                unset: true,
+                unspecified: false
+            }
+        );
+        assert_eq!(
+            FilterDrivers::from_config_names(["filter.unspecified.process", "filter.unset.clean"]),
+            BOTH_DRIVERS
+        );
+        // A driver name may itself hold dots; only the last one ends it.
+        assert_eq!(
+            FilterDrivers::from_config_names(["filter.my.unset.clean"]),
+            NO_DRIVERS
+        );
     }
 
     /// Asking git costs a pass over the index, so it is asked only where the answer
     /// depends on it.
     #[test]
-    fn an_unset_is_confirmed_only_where_the_readings_disagree() {
+    fn a_state_is_confirmed_only_where_the_readings_disagree() {
         let decide =
             |endings: LineEndings| move |values: &HashMap<String, Value>| converts(values, endings);
         let binary = values(&[("text", Value::Unset)]);
-        assert!(unsets_to_confirm(&binary, decide(PLAIN)).is_empty());
-        assert_eq!(unsets_to_confirm(&binary, decide(AUTOCRLF)), ["text"]);
-        let mut both = unsets_to_confirm(
+        assert!(ambiguous_to_confirm(&binary, NO_DRIVERS, decide(PLAIN)).is_empty());
+        assert_eq!(
+            ambiguous_to_confirm(&binary, NO_DRIVERS, decide(AUTOCRLF)),
+            ["-text"]
+        );
+        let mut both = ambiguous_to_confirm(
             &values(&[("text", Value::Unset), ("crlf", Value::Unset)]),
+            NO_DRIVERS,
             decide(AUTOCRLF),
         );
         both.sort();
-        assert_eq!(both, ["crlf", "text"]);
+        assert_eq!(both, ["-crlf", "-text"]);
         // A path another attribute converts either way needs nothing confirmed.
-        let with_eol = values(&[("crlf", Value::Unset), ("ident", Value::Set)]);
-        assert!(unsets_to_confirm(&with_eol, decide(PLAIN)).is_empty());
-        assert!(unsets_to_confirm(&values(&[("text", Value::Set)]), decide(AUTOCRLF)).is_empty());
+        let with_ident = values(&[("crlf", Value::Unset), ("ident", Value::Set)]);
+        assert!(ambiguous_to_confirm(&with_ident, NO_DRIVERS, decide(PLAIN)).is_empty());
+        // With a driver named `unspecified`, a path with no filter has to be confirmed.
+        let plain = values(&[("filter", Value::Unspecified)]);
+        assert!(ambiguous_to_confirm(&plain, NO_DRIVERS, decide(PLAIN)).is_empty());
+        assert_eq!(
+            ambiguous_to_confirm(&plain, BOTH_DRIVERS, decide(PLAIN)),
+            ["!filter"]
+        );
     }
 
     #[test]
