@@ -585,6 +585,8 @@ fn conform_to_checkout(path: &Path, planned: &Planned, umask: u32) -> Option<Sta
     let wanted = FileTime::from_unix_time(i64::from(planned.mtime.secs), planned.mtime.nsecs);
     let mut metadata = Metadata::from_path_no_follow(path).ok()?;
     if Stat::from_fs(&metadata).ok()?.mtime != planned.mtime {
+        // Its std replacement, `std::fs::set_times_nofollow`, is newer than our rust-version.
+        #[allow(deprecated)]
         filetime::set_symlink_file_times(path, wanted, wanted).ok()?;
         metadata = Metadata::from_path_no_follow(path).ok()?;
     }
