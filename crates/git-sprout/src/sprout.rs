@@ -65,7 +65,7 @@ pub fn add(command: &AddCommand, stats: &mut Stats) -> ExitCode {
         return exit_code(created.code());
     }
 
-    let destination = locate(&git, command, &before);
+    let destination = locate(command);
 
     // From here on the worktree exists but holds no files, so every remaining step is
     // best effort and step 7 must run whatever happens. A panic in the clone phase would
@@ -161,23 +161,13 @@ fn worktrees(git: &Git) -> Vec<source::Worktree> {
         .unwrap_or_default()
 }
 
-/// Finds the worktree `git worktree add` just created.
-///
-/// The listing tells us directly which path is new, which needs no guessing about how a
-/// relative path resolved. The path the user asked for is the fallback.
-fn locate(git: &Git, command: &AddCommand, before: &[source::Worktree]) -> Option<PathBuf> {
-    let known: HashSet<&Path> = before
-        .iter()
-        .map(|worktree| worktree.path.as_path())
-        .collect();
-    let added = worktrees(git)
-        .into_iter()
-        .find(|worktree| !known.contains(worktree.path.as_path()))
-        .map(|worktree| worktree.path);
-    added.or_else(|| {
-        let requested = working_directory(&command.globals).join(as_path_os(&command.path));
-        requested.join(".git").exists().then_some(requested)
-    })
+/// Resolves this invocation's destination without inspecting other concurrent creations.
+fn locate(command: &AddCommand) -> Option<PathBuf> {
+    let requested = working_directory(&command.globals).join(as_path_os(&command.path));
+    if !requested.join(".git").exists() {
+        return None;
+    }
+    std::fs::canonicalize(requested).ok()
 }
 
 /// The directory git resolves relative paths against, after applying every `-C`.
