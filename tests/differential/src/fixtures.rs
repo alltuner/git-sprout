@@ -14,6 +14,7 @@ const SKIP_STATUS: i32 = 77;
 pub const ALL: &[&str] = &[
     "plain",
     "attrs-eol-crlf",
+    "attrs-crlf",
     "attrs-ident",
     "attrs-utf16",
     "attrs-filter",
