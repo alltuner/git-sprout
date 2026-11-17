@@ -1,3 +1,6 @@
+// ABOUTME: Proves a worktree registered by someone else mid-creation cannot take the
+// ABOUTME: place of the destination this invocation asked for.
+
 #![cfg(unix)]
 
 use std::fs;
