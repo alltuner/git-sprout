@@ -34,13 +34,16 @@ const RACY_PATH_LIMIT: usize = 1000;
 /// The configuration that decides how blob bytes become working-tree bytes, including
 /// where attributes come from and how their patterns match (`core.ignoreCase`). Cloning
 /// is only sound when both worktrees resolve all of it the same way.
-const CONVERSION_KEYS: &[&str] = &[
-    "core.autocrlf",
-    "core.eol",
-    "core.symlinks",
-    "core.attributesFile",
-    "attr.tree",
-    "core.ignoreCase",
+/// Each key comes with the `git config --type` it is read as, so that two spellings of
+/// one value compare equal and two values one spelling hides do not: `git config --get`
+/// prints both a key with no value (true) and an empty one (false) as nothing.
+const CONVERSION_KEYS: &[(&str, Option<&str>)] = &[
+    ("core.autocrlf", Some("bool-or-str")),
+    ("core.eol", Some("bool-or-str")),
+    ("core.symlinks", Some("bool")),
+    ("core.attributesFile", Some("path")),
+    ("attr.tree", None),
+    ("core.ignoreCase", Some("bool")),
 ];
 
 /// Creates the worktree, cloning what it can and letting git finish the job.
@@ -375,9 +378,17 @@ fn listing(git: &Git, worktree: &Path, commit: &str) -> Option<tree::Listing> {
 
 /// Whether the two worktrees would convert blob bytes differently.
 fn conversion_mismatch(git: &Git, source: &Path, destination: &Path) -> Option<String> {
-    for key in CONVERSION_KEYS {
-        if git.config(source, key) != git.config(destination, key) {
-            return Some(format!("{key} differs between the worktrees"));
+    for (key, kind) in CONVERSION_KEYS {
+        let read = |worktree: &Path| match kind {
+            Some(kind) => git.config_typed(worktree, kind, key).ok(),
+            None => Some(git.config(worktree, key)),
+        };
+        match (read(source), read(destination)) {
+            (Some(source), Some(destination)) if source == destination => {}
+            (Some(_), Some(_)) => {
+                return Some(format!("{key} differs between the worktrees"));
+            }
+            _ => return Some(format!("{key} cannot be read")),
         }
     }
     if let Some(reason) =
@@ -1055,6 +1066,32 @@ mod tests {
             );
         }
         std::fs::write(&include, "").expect("clear include");
+
+        // Git reads a boolean however it is spelled: a key with no value is true and an
+        // empty value false, though `git config --get` prints both as nothing.
+        let _ = git.capture(Some(&repo), ["config", "--unset-all", "core.ignoreCase"]);
+        let config = repo.join(".git").join("config");
+        let mut text = std::fs::read_to_string(&config).expect("read config");
+        text.push_str("[core]\n\tignoreCase\n");
+        std::fs::write(&config, text).expect("write config");
+        // The include has to come after the key to override it.
+        for args in [
+            &["config", "--remove-section", "includeIf.onbranch:topic"][..],
+            &[
+                "config",
+                "includeIf.onbranch:topic.path",
+                "topic-attributes",
+            ],
+        ] {
+            git.capture(Some(&repo), args).expect("git config");
+        }
+        std::fs::write(&include, "[core]\n\tignoreCase =\n").expect("write include");
+        assert_eq!(
+            conversion_mismatch(&git, &repo, &destination),
+            Some("core.ignoreCase differs between the worktrees".to_string()),
+        );
+        std::fs::write(&include, "").expect("clear include");
+        let _ = git.capture(Some(&repo), ["config", "--unset-all", "core.ignoreCase"]);
 
         // The same relative name selects a file in each worktree's own root, and the same
         // tree-ish, such as `HEAD`, a tree in each worktree's own history.
