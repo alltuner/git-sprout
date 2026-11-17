@@ -116,6 +116,34 @@ canonical_checkout() {
     g update-index --refresh -q >/dev/null 2>&1 || true
 }
 
+# Commits an LF text tree with conversion off, then sets a line-ending option to the
+# spelling under test: `spelled_option core.autocrlf yes`, or with no value at all, which
+# git reads as true for a boolean. The stat cache stays clean, so the working copies keep
+# LF, while a checkout under the new setting may write CRLF. Git reads `core.autocrlf` as a
+# boolean and `core.eol` without regard to case, so a clone plan that compares either one
+# against a single spelling clones LF where git writes CRLF.
+spelled_option() {
+    base_history
+    write_text_tree "src" 12 8 2
+    write_binary "assets/blob.bin" 4
+    commit "lf tree"
+    finish_repo
+    g config --unset-all "$1" || true
+    if [ "$#" -ge 2 ]; then
+        g config "$1" "$2"
+    else
+        printf '[%s]\n\t%s\n' "${1%%.*}" "${1#*.}" >> "$REPO/.git/config"
+    fi
+    case "$(g ls-files --eol -- src/group0/file0.txt)" in
+        *w/lf*) ;;
+        *) echo "fixture precondition: the working copies should hold LF" >&2; exit 1 ;;
+    esac
+    if [ -n "$(g status --porcelain)" ]; then
+        echo "fixture precondition: the source checkout should be clean" >&2
+        exit 1
+    fi
+}
+
 # The refs the flag matrix reaches for: a tag, a branch that already exists, and a
 # remote with two tracking branches so --track and --guess-remote have something to
 # resolve. Best effort: a repository with no commits gets none of them.
