@@ -21,7 +21,13 @@ const ACCELERATED: &[&str] = &[
     "attrs-untracked",
     "attrs-assumed",
     "attrs-filtered",
+    "attrs-eol-lf",
 ];
+
+/// Fixtures holding files that are stat-clean in the source and yet are not what a
+/// checkout writes, with how many such files each holds. Each must be caught by the
+/// byte comparison and left to git, while the rest of the fixture is still cloned.
+const CONTENT_REJECTED: &[(&str, u64)] = &[("attrs-eol-lf", 3)];
 
 /// Fixtures where cloning is expected to fire on nothing at all.
 ///
@@ -38,6 +44,12 @@ const ACCELERATED: &[&str] = &[
 /// The `autocrlf-*` fixtures spell `core.autocrlf=true` the other ways git accepts it
 /// (`yes`, `on`, `1`, `TRUE`, a key with no value), so they must clone nothing either.
 ///
+/// The one converting case that does clone is a text path checked out with LF, where a
+/// checkout writes the blob verbatim and each clone is hashed against it (`attrs-eol-lf`).
+/// `attrs-auto-eol-crlf` is here to hold the other side of that line, and `eol-crlf-upper`
+/// and `eol-unknown` hold it under `core.eol=CRLF` and under a value git does not define,
+/// which is left to git rather than guessed at.
+///
 /// So this asserts the decision holds. If a future change starts cloning converted
 /// paths, that is a correctness regression and this test is what catches it — do not
 /// "fix" it by moving the fixture back into ACCELERATED.
@@ -48,6 +60,9 @@ const NOT_ACCELERATED: &[&str] = &[
     "autocrlf-one",
     "autocrlf-upper",
     "autocrlf-valueless",
+    "attrs-auto-eol-crlf",
+    "eol-crlf-upper",
+    "eol-unknown",
 ];
 
 #[test]
@@ -96,6 +111,17 @@ fn the_fast_path_is_taken_where_the_fixture_exists_to_prove_it() {
                          the output may be right but the fast path never ran",
                         stats.cloned, stats.skipped, stats.fallback_reason,
                     ));
+                } else if let Some((_, expected)) =
+                    CONTENT_REJECTED.iter().find(|(name, _)| name == fixture)
+                {
+                    if stats.content_rejected != *expected {
+                        failures.push(format!(
+                            "{fixture}: {} clones failed the byte comparison, expected {expected}; \
+                             a stat-clean file that a checkout would write differently has to be \
+                             caught by hashing the clone, not trusted on the stat cache",
+                            stats.content_rejected,
+                        ));
+                    }
                 }
             }
         }

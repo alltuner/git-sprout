@@ -20,6 +20,10 @@ pub struct Stats {
     /// Not an independent measurement: it is `skipped` by construction, and both
     /// are zero when no plan ran at all. Never treat it as a third signal.
     pub checked_out_by_git: u64,
+    /// Clones whose bytes had to be hashed against the blob because the add direction
+    /// may have normalised the source file, and how many of those failed and went to git.
+    pub content_checked: u64,
+    pub content_rejected: u64,
     pub source: Option<String>,
     pub clone_backend: Option<String>,
     pub fell_back: bool,
