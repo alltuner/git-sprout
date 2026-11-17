@@ -311,7 +311,7 @@ fn populate(git: &Git, destination: &Path, before: &[source::Worktree], stats: &
             .cloned(),
     );
     verified.paths.sort_by(|a, b| a.path.cmp(&b.path));
-    drop_converted_paths(git, &source, &mut verified.paths);
+    drop_converted_paths(git, &source, destination, &mut verified.paths);
 
     let plan = plan::assemble(
         &target,
@@ -388,8 +388,10 @@ fn worktree_attributes(git: &Git, worktree: &Path) -> Option<Vec<u8>> {
 /// Every remaining path is one where the blob's bytes and the working tree's bytes are the
 /// same thing, which is what makes the index stat cache a sufficient answer. The
 /// attributes are read from the source, which is sound because the plan has already
-/// established that both sides carry the same attribute blobs.
-fn drop_converted_paths(git: &Git, source: &Path, paths: &mut Vec<Planned>) {
+/// established that both sides carry the same attribute blobs. The filter drivers are read
+/// from both, because a configuration include can give the destination a driver the
+/// source lacks.
+fn drop_converted_paths(git: &Git, source: &Path, destination: &Path, paths: &mut Vec<Planned>) {
     if paths.is_empty() {
         return;
     }
@@ -410,7 +412,7 @@ fn drop_converted_paths(git: &Git, source: &Path, paths: &mut Vec<Planned>) {
     };
     let reported = attributes::parse_check_attr(&output);
     let decide = |values: &HashMap<String, Value>| attributes::converts(values, endings);
-    let drivers = filter_drivers(git, source);
+    let drivers = filter_drivers(git, source).or(filter_drivers(git, destination));
     let confirmed = confirm_states(git, source, paths, &reported, drivers, decide);
     paths.retain(|planned| {
         let Some(values) = reported.get(&planned.path) else {
@@ -425,11 +427,11 @@ fn drop_converted_paths(git: &Git, source: &Path, paths: &mut Vec<Planned>) {
     });
 }
 
-/// Which of the words `git check-attr` prints for a state name a configured filter
-/// driver. A git that cannot answer is taken to have both, which leaves every such state to
-/// be confirmed.
-fn filter_drivers(git: &Git, source: &Path) -> FilterDrivers {
-    match git.config_names(source, r"^filter\.(unset|unspecified)\.") {
+/// Which of the words `git check-attr` prints for a state name a filter driver configured
+/// for `worktree`. A git that cannot answer is taken to have both, which leaves every such
+/// state to be confirmed.
+fn filter_drivers(git: &Git, worktree: &Path) -> FilterDrivers {
+    match git.config_names(worktree, r"^filter\.(unset|unspecified)\.") {
         Ok(names) => FilterDrivers::from_config_names(names.iter().map(String::as_str)),
         Err(_) => FilterDrivers {
             unset: true,
@@ -846,7 +848,7 @@ mod tests {
             })
             .collect();
 
-        drop_converted_paths(&git, &repo, &mut paths);
+        drop_converted_paths(&git, &repo, &repo, &mut paths);
 
         let kept: Vec<&[u8]> = paths
             .iter()
@@ -862,6 +864,85 @@ mod tests {
             ]
         );
         let _ = std::fs::remove_dir_all(&repo);
+    }
+
+    /// Git reads the destination's configuration when it checks the destination out, and
+    /// an include can give it a filter driver the source does not see, such as one
+    /// `includeIf.onbranch` adds for the destination's branch alone. The words
+    /// `git check-attr` shares with string values are then ambiguous on that side too.
+    #[test]
+    fn a_driver_only_the_destination_sees_is_honoured() {
+        let scratch =
+            std::env::temp_dir().join(format!("git-sprout-branch-driver-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&scratch);
+        let (repo, destination) = (scratch.join("repo"), scratch.join("destination"));
+        let git = Git::new(Vec::new());
+        git.capture(
+            None,
+            [OsStr::new("init"), OsStr::new("-q"), repo.as_os_str()],
+        )
+        .expect("git init");
+        std::fs::write(
+            repo.join(".gitattributes"),
+            "*.filter-string -crlf filter=unspecified\n*.crlf-unset -crlf\n",
+        )
+        .expect("write attributes");
+        for name in ["a.filter-string", "a.crlf-unset"] {
+            std::fs::write(repo.join(name), "one\ntwo\n").expect("write file");
+        }
+        for args in [
+            &["add", "--", "."][..],
+            &[
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@example.invalid",
+                "commit",
+                "-q",
+                "--no-gpg-sign",
+                "-m",
+                "base",
+            ],
+            &["checkout", "-q", "--detach"],
+            &["config", "core.autocrlf", "true"],
+            &["config", "includeIf.onbranch:topic.path", "topic-drivers"],
+        ] {
+            git.capture(Some(&repo), args).expect("git");
+        }
+        std::fs::write(
+            repo.join(".git").join("topic-drivers"),
+            "[filter \"unspecified\"]\n\tsmudge = cat\n",
+        )
+        .expect("write include");
+        git.capture(
+            Some(&repo),
+            [
+                OsStr::new("worktree"),
+                OsStr::new("add"),
+                OsStr::new("-q"),
+                OsStr::new("--no-checkout"),
+                OsStr::new("-b"),
+                OsStr::new("topic"),
+                destination.as_os_str(),
+            ],
+        )
+        .expect("git worktree add");
+        let planned = |name: &str| Planned {
+            path: name.as_bytes().to_vec(),
+            mode: 0o100644,
+            oid: gix_hash::ObjectId::null(gix_hash::Kind::Sha1),
+            mtime: gix_index::entry::stat::Time::default(),
+        };
+        let mut paths = vec![planned("a.crlf-unset"), planned("a.filter-string")];
+
+        drop_converted_paths(&git, &repo, &destination, &mut paths);
+
+        let kept: Vec<&[u8]> = paths
+            .iter()
+            .map(|planned| planned.path.as_slice())
+            .collect();
+        assert_eq!(kept, [b"a.crlf-unset".as_slice()]);
+        let _ = std::fs::remove_dir_all(&scratch);
     }
 
     #[test]

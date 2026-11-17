@@ -66,6 +66,14 @@ impl FilterDrivers {
         drivers
     }
 
+    /// The drivers either side configures.
+    pub fn or(self, other: FilterDrivers) -> FilterDrivers {
+        FilterDrivers {
+            unset: self.unset || other.unset,
+            unspecified: self.unspecified || other.unspecified,
+        }
+    }
+
     fn names(self, word: &str) -> bool {
         match word {
             "unset" => self.unset,
