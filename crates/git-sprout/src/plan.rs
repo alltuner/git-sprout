@@ -332,18 +332,37 @@ pub fn as_path(path: &[u8]) -> PathBuf {
     PathBuf::from(String::from_utf8_lossy(path).into_owned())
 }
 
-/// The `.gitattributes` blobs the source index records, split into the ones its stat cache
-/// vouches for and the ones only git can settle by re-reading the file.
+/// The `.gitattributes` entries of the source index, sorted by how far each can be trusted.
+pub struct SourceAttributeFiles {
+    /// Every blob the index records, by path.
+    pub recorded: BTreeMap<Vec<u8>, ObjectId>,
+    /// The ones the stat cache does not vouch for, which only git can settle by re-reading
+    /// the file.
+    pub suspect: Vec<Vec<u8>>,
+    /// The ones whose entry git has stopped checking against the file at all
+    /// (`--assume-unchanged`, `--skip-worktree`, intent to add), where neither the blob
+    /// nor git can say what rules the file holds.
+    pub untrusted: Vec<Vec<u8>>,
+}
+
+/// The `.gitattributes` blobs the source index records, and which of them the plan can
+/// take at the index's word.
 pub fn source_attribute_files(
     source_index: &gix_index::File,
     source_root: &Path,
-) -> (BTreeMap<Vec<u8>, ObjectId>, Vec<Vec<u8>>) {
+) -> SourceAttributeFiles {
     let mut files = BTreeMap::new();
     let mut suspect = Vec::new();
+    let mut untrusted = Vec::new();
     let timestamp = source_index.timestamp();
     for entry in source_index.entries() {
         let path = entry.path(source_index).to_vec();
         if !crate::tree::is_attributes_file(&path) {
+            continue;
+        }
+        if verify::entry_is_untrustworthy(entry.flags) {
+            files.insert(path.clone(), entry.id);
+            untrusted.push(path);
             continue;
         }
         let verdict =
@@ -355,7 +374,41 @@ pub fn source_attribute_files(
             suspect.push(path);
         }
     }
-    (files, suspect)
+    SourceAttributeFiles {
+        recorded: files,
+        suspect,
+        untrusted,
+    }
+}
+
+/// The attributes files in the source's working tree that its index does not record, in
+/// the directories of the target tree.
+///
+/// Git reads a directory's `.gitattributes` from the working tree whether or not it is
+/// tracked, so an untracked or ignored one shapes what `git check-attr` reports for the
+/// source while a checkout of the target never sees it. Its directory is then no more
+/// alike on both sides than one whose tracked attributes differ.
+pub fn untracked_attribute_files(
+    target: &Listing,
+    source_attributes: &BTreeMap<Vec<u8>, ObjectId>,
+    source_root: &Path,
+) -> Vec<Vec<u8>> {
+    let root: &[u8] = &[];
+    std::iter::once(root)
+        .chain(target.trees.keys().map(Vec::as_slice))
+        .map(|directory| {
+            let mut path = directory.to_vec();
+            if !path.is_empty() {
+                path.push(b'/');
+            }
+            path.extend_from_slice(crate::tree::ATTRIBUTES_FILE);
+            path
+        })
+        .filter(|path| {
+            !source_attributes.contains_key(path)
+                && std::fs::symlink_metadata(source_root.join(as_path(path))).is_ok()
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -494,6 +547,98 @@ mod tests {
         assert!(paths.contains(b"Doc".as_slice()));
         assert!(paths.contains(b"doc".as_slice()));
         assert_eq!(prefixes, vec![b"doc/".to_vec()]);
+    }
+
+    /// Git reads a `.gitattributes` from the source's working tree even where the index
+    /// records none, as an untracked or ignored file. A checkout of the target reads only
+    /// the target's own, so what such a file says about a path is no guide to the
+    /// destination.
+    #[test]
+    fn reports_attributes_files_only_the_source_working_tree_holds() {
+        let scratch = std::env::temp_dir().join(format!(
+            "git-sprout-untracked-attributes-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&scratch);
+        for directory in ["src", "docs", "tracked"] {
+            std::fs::create_dir_all(scratch.join(directory)).unwrap();
+        }
+        std::fs::write(scratch.join("src/.gitattributes"), "*.txt -crlf\n").unwrap();
+        std::fs::write(scratch.join("tracked/.gitattributes"), "*.txt -text\n").unwrap();
+        let target = listing(
+            &[
+                ("src/a.txt", 1),
+                ("docs/b.txt", 2),
+                ("tracked/c.txt", 3),
+                ("tracked/.gitattributes", 5),
+            ],
+            &[("src", 6), ("docs", 7), ("tracked", 8)],
+            &[],
+        );
+        let recorded: BTreeMap<Vec<u8>, ObjectId> =
+            [(b"tracked/.gitattributes".to_vec(), oid(5))].into();
+
+        assert_eq!(
+            untracked_attribute_files(&target, &recorded, &scratch),
+            vec![b"src/.gitattributes".to_vec()]
+        );
+
+        std::fs::write(scratch.join(".gitattributes"), "* -text\n").unwrap();
+        assert_eq!(
+            untracked_attribute_files(&target, &recorded, &scratch),
+            vec![b".gitattributes".to_vec(), b"src/.gitattributes".to_vec()]
+        );
+        let _ = std::fs::remove_dir_all(&scratch);
+    }
+
+    /// An index entry git no longer checks against the working tree, such as one marked
+    /// `--assume-unchanged`, says nothing about the file git reads its rules from, and
+    /// `git diff-files` will not report the difference either.
+    #[test]
+    fn an_attributes_file_git_does_not_check_is_untrusted() {
+        let repo = std::env::temp_dir().join(format!(
+            "git-sprout-assumed-attributes-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&repo);
+        let git = crate::git::Git::new(Vec::new());
+        git.capture(
+            None,
+            [
+                std::ffi::OsStr::new("init"),
+                std::ffi::OsStr::new("-q"),
+                repo.as_os_str(),
+            ],
+        )
+        .expect("git init");
+        std::fs::create_dir_all(repo.join("sub")).unwrap();
+        std::fs::write(repo.join(".gitattributes"), "*.txt text\n").unwrap();
+        std::fs::write(repo.join("sub/.gitattributes"), "*.txt text\n").unwrap();
+        git.capture(Some(&repo), ["add", "--", "."])
+            .expect("git add");
+        git.capture(
+            Some(&repo),
+            [
+                "update-index",
+                "--assume-unchanged",
+                "--",
+                "sub/.gitattributes",
+            ],
+        )
+        .expect("git update-index");
+        let index = gix_index::File::at(
+            repo.join(".git").join("index"),
+            gix_hash::Kind::Sha1,
+            true,
+            gix_index::decode::Options::default(),
+        )
+        .expect("read index");
+
+        let files = source_attribute_files(&index, &repo);
+
+        assert_eq!(files.recorded.len(), 2);
+        assert_eq!(files.untrusted, vec![b"sub/.gitattributes".to_vec()]);
+        let _ = std::fs::remove_dir_all(&repo);
     }
 
     #[test]

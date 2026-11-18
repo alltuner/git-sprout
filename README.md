@@ -45,12 +45,15 @@ Two things have to be true. The filesystem needs block cloning: **APFS** on macO
 XFS with reflinks, or bcachefs** on Linux; **a ReFS volume or a Windows 11 Dev Drive** on
 Windows. Everywhere else, ext4 and NTFS included, it runs plain `git worktree add`.
 
-And the repository has to be one that does not convert files on checkout, because a file can
-only be shared when checking it out would not rewrite its bytes. Git for Windows turns
-`core.autocrlf` on by default, and with that setting there is nothing to share, so on a
-typical Windows repository sprout passes straight through to `git worktree add`. The same
-goes for `* text=auto eol=crlf` on any platform. Repositories with no conversion attributes
-clone everything, which is the common case on macOS and Linux, the kernel included.
+And a file can only be shared when checking it out would not rewrite its bytes. Git for
+Windows turns `core.autocrlf` on by default, and with that setting there is nothing to
+share, so on a typical Windows repository sprout passes straight through to
+`git worktree add`. The same goes for `* text=auto eol=crlf` on any platform. Repositories
+with no conversion attributes clone everything, which is the common case on macOS and Linux,
+the kernel included. Text normalised to LF, such as `* text=auto eol=lf`, is checked out
+as the blob's own bytes, so those files are cloned too; each clone is hashed against its
+blob first, because a working copy can still hold CRLF that `git add` normalised away, and
+one that does not match is left to git.
 
 ## What is git-sprout?
 
