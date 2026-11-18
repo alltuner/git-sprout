@@ -180,9 +180,34 @@ pub fn parse_cat_file_batch(output: &[u8], count: usize) -> Option<Vec<Vec<u8>>>
     rest.is_empty().then_some(contents)
 }
 
+/// Reads the sizes `git cat-file --batch-check` writes for `count` requested objects, in
+/// the order they were asked for, one `<oid> <type> <size>` line each. `None` when the
+/// output is not that, or names an object git does not have.
+pub fn parse_cat_file_batch_check(output: &[u8], count: usize) -> Option<Vec<u64>> {
+    let text = std::str::from_utf8(output).ok()?;
+    let sizes: Vec<u64> = text
+        .lines()
+        .map(|line| line.split(' ').nth(2)?.parse().ok())
+        .collect::<Option<_>>()?;
+    (sizes.len() == count).then_some(sizes)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reads_the_sizes_cat_file_batch_check_writes() {
+        assert_eq!(
+            parse_cat_file_batch_check(b"aa blob 3\nbb blob 0\n", 2),
+            Some(vec![3, 0])
+        );
+        assert_eq!(
+            parse_cat_file_batch_check(b"aa blob 3\nbb missing\n", 2),
+            None
+        );
+        assert_eq!(parse_cat_file_batch_check(b"aa blob 3\n", 2), None);
+    }
 
     #[test]
     fn reads_the_objects_cat_file_batch_writes() {

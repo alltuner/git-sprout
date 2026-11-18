@@ -530,6 +530,7 @@ fn drop_converted_paths(git: &Git, source: &Path, destination: &Path, paths: &mu
         drivers,
         decide,
     );
+    let mut binary = HashSet::new();
     paths.retain(|planned| {
         let Some(values) = reported.get(&planned.path) else {
             return false;
@@ -539,8 +540,61 @@ fn drop_converted_paths(git: &Git, source: &Path, destination: &Path, paths: &mu
                 .get(magic)
                 .is_some_and(|matched| matched.contains(&planned.path))
         });
-        !decide(&values)
+        let keep = !decide(&values);
+        if keep && attributes::marks_binary(&values) {
+            binary.insert(planned.path.clone());
+        }
+        keep
     });
+    drop_resized_binary_paths(git, source, paths, &binary);
+}
+
+/// Removes the paths an attribute marks binary whose source file is not the size of its
+/// blob.
+///
+/// A binary path is checked out as its blob's bytes, so a clean copy of one is those
+/// bytes. The stat cache says only that nothing touched the file since git last looked,
+/// and an attribute that changed since then leaves it vouching for bytes written under the
+/// old one: a file added as `text` under core.autocrlf=true keeps its CRLF once `-crlf`
+/// or `-text` lands, and git still calls it clean. Line endings rewritten either way
+/// change the size, which `git cat-file --batch-check` reports without reading the blob.
+/// A git that cannot report the sizes leaves every such path to git.
+fn drop_resized_binary_paths(
+    git: &Git,
+    source: &Path,
+    paths: &mut Vec<Planned>,
+    binary: &HashSet<Vec<u8>>,
+) {
+    let checked: Vec<(Vec<u8>, gix_hash::ObjectId)> = paths
+        .iter()
+        .filter(|planned| planned.mode != SYMLINK_MODE && binary.contains(&planned.path))
+        .map(|planned| (planned.path.clone(), planned.oid))
+        .collect();
+    if checked.is_empty() {
+        return;
+    }
+    let mut request = Vec::new();
+    for (_, oid) in &checked {
+        request.extend_from_slice(oid.to_string().as_bytes());
+        request.push(b'\n');
+    }
+    let sizes = git
+        .capture_with_input(Some(source), ["cat-file", "--batch-check"], &request)
+        .ok()
+        .and_then(|output| crate::git::parse_cat_file_batch_check(&output, checked.len()));
+    let resized: HashSet<Vec<u8>> = match sizes {
+        None => checked.into_iter().map(|(path, _)| path).collect(),
+        Some(sizes) => checked
+            .into_iter()
+            .zip(sizes)
+            .filter(|((path, _), size)| {
+                std::fs::symlink_metadata(source.join(as_path(path)))
+                    .map_or(true, |metadata| metadata.len() != *size)
+            })
+            .map(|((path, _), _)| path)
+            .collect(),
+    };
+    paths.retain(|planned| !resized.contains(&planned.path));
 }
 
 /// Which of the words `git check-attr` prints for a state name a filter driver configured
@@ -959,7 +1013,7 @@ mod tests {
             .map(|name| Planned {
                 path: name.as_bytes().to_vec(),
                 mode: 0o100644,
-                oid: gix_hash::ObjectId::null(gix_hash::Kind::Sha1),
+                oid: index_oid(&git, &repo, name),
                 mtime: gix_index::entry::stat::Time::default(),
             })
             .collect();
@@ -979,6 +1033,59 @@ mod tests {
                 b"a.text-unset-crlf-string",
             ]
         );
+        let _ = std::fs::remove_dir_all(&repo);
+    }
+
+    /// The blob id the index at `repo` records for `name`.
+    fn index_oid(git: &Git, repo: &Path, name: &str) -> gix_hash::ObjectId {
+        let hex = git
+            .capture_line(Some(repo), ["rev-parse", &format!(":{name}")])
+            .expect("git rev-parse");
+        gix_hash::ObjectId::from_hex(hex.as_bytes()).expect("object id")
+    }
+
+    /// A path an attribute marks binary is checked out as its blob, so a clean copy of it
+    /// is the blob's bytes, but the stat cache only says nothing touched the file since git
+    /// last looked. A file added as `text` under core.autocrlf=true keeps the CRLF it was
+    /// written with after `-crlf` (or `-text`) lands, and git still calls it clean.
+    #[test]
+    fn a_binary_copy_written_under_an_earlier_rule_is_left_to_git() {
+        let repo =
+            std::env::temp_dir().join(format!("git-sprout-stale-binary-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&repo);
+        let git = Git::new(Vec::new());
+        git.capture(
+            None,
+            [OsStr::new("init"), OsStr::new("-q"), repo.as_os_str()],
+        )
+        .expect("git init");
+        git.capture(Some(&repo), ["config", "core.autocrlf", "true"])
+            .expect("git config");
+        std::fs::write(repo.join(".gitattributes"), "*.txt text\n").expect("write");
+        std::fs::write(repo.join("a.txt"), "one\r\ntwo\r\n").expect("write");
+        std::fs::write(repo.join("b.bin"), "one\ntwo\n").expect("write");
+        git.capture(Some(&repo), ["add", "--", "."])
+            .expect("git add");
+        std::fs::write(repo.join(".gitattributes"), "*.txt -crlf\n*.bin -text\n").expect("write");
+        git.capture(Some(&repo), ["add", "--", ".gitattributes"])
+            .expect("git add");
+        let mut paths: Vec<Planned> = ["a.txt", "b.bin"]
+            .iter()
+            .map(|name| Planned {
+                path: name.as_bytes().to_vec(),
+                mode: 0o100644,
+                oid: index_oid(&git, &repo, name),
+                mtime: gix_index::entry::stat::Time::default(),
+            })
+            .collect();
+
+        drop_converted_paths(&git, &repo, &repo, &mut paths);
+
+        let kept: Vec<&[u8]> = paths
+            .iter()
+            .map(|planned| planned.path.as_slice())
+            .collect();
+        assert_eq!(kept, [b"b.bin".as_slice()]);
         let _ = std::fs::remove_dir_all(&repo);
     }
 
@@ -1254,7 +1361,7 @@ mod tests {
         let planned = |name: &str| Planned {
             path: name.as_bytes().to_vec(),
             mode: 0o100644,
-            oid: gix_hash::ObjectId::null(gix_hash::Kind::Sha1),
+            oid: index_oid(&git, &repo, name),
             mtime: gix_index::entry::stat::Time::default(),
         };
         let mut paths = vec![planned("a.crlf-unset"), planned("a.filter-string")];

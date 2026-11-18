@@ -239,6 +239,12 @@ pub fn converts(values: &HashMap<String, Value>, endings: LineEndings) -> bool {
     endings.autocrlf || endings.crlf
 }
 
+/// Whether an attribute marks the path binary, `-text` or `-crlf`, so that a checkout
+/// writes its blob's bytes whatever the line-ending configuration says.
+pub fn marks_binary(values: &HashMap<String, Value>) -> bool {
+    text_attribute(values) == &Value::Unset
+}
+
 /// The path's `text` attribute, or where that is unspecified its deprecated `crlf`
 /// spelling, the way git's own conversion reads them: `crlf` means `text`, `-crlf` means
 /// `-text`, and `crlf=input` means `text eol=lf`.
@@ -463,6 +469,17 @@ mod tests {
             ambiguous_to_confirm(&plain, BOTH_DRIVERS, decide(PLAIN)),
             ["!filter"]
         );
+    }
+
+    #[test]
+    fn binary_is_read_from_text_and_then_crlf() {
+        assert!(marks_binary(&values(&[("text", Value::Unset)])));
+        assert!(marks_binary(&values(&[("crlf", Value::Unset)])));
+        assert!(!marks_binary(&values(&[
+            ("text", Value::Set),
+            ("crlf", Value::Unset)
+        ])));
+        assert!(!marks_binary(&values(&[])));
     }
 
     #[test]
