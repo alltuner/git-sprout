@@ -407,21 +407,44 @@ fn conversion_mismatch(git: &Git, source: &Path, destination: &Path) -> Option<S
 
 /// Why a configured attributes source would read differently in each worktree even when
 /// both name it alike, if it would. A relative `core.attributesFile` is a path from the
-/// worktree's root, so each worktree reads its own file, and `attr.tree` names a tree-ish,
-/// and one such as `HEAD` resolves in each worktree's own history.
+/// worktree's root, so each worktree reads its own file, as does an unset one where the
+/// default it stands for is relative (see [`default_attributes_file_is_relative`]). And
+/// `attr.tree` names a tree-ish, which, like `HEAD`, resolves in each worktree's own
+/// history.
 fn attribute_source_reads_per_worktree(git: &Git, worktree: &Path) -> Option<String> {
-    if git
-        .config(worktree, "core.attributesFile")
-        .is_some_and(|file| {
-            !(Path::new(&file).is_absolute()
+    match git.config(worktree, "core.attributesFile") {
+        Some(file)
+            if !(Path::new(&file).is_absolute()
                 || file.starts_with('~')
-                || file.starts_with("%(prefix)/"))
-        })
-    {
-        return Some("core.attributesFile is relative to each worktree".to_string());
+                || file.starts_with("%(prefix)/")) =>
+        {
+            return Some("core.attributesFile is relative to each worktree".to_string());
+        }
+        None if default_attributes_file_is_relative(
+            std::env::var_os("XDG_CONFIG_HOME").as_deref(),
+            std::env::var_os("HOME").as_deref(),
+        ) =>
+        {
+            return Some("the default attributes file is relative to each worktree".to_string());
+        }
+        _ => {}
     }
     git.config(worktree, "attr.tree")
         .map(|_| "attr.tree names a tree to read attributes from".to_string())
+}
+
+/// Whether the attributes file git reads when `core.attributesFile` is unset,
+/// `$XDG_CONFIG_HOME/git/attributes` or, where that variable is unset or empty,
+/// `$HOME/.config/git/attributes`, is a relative path.
+fn default_attributes_file_is_relative(
+    xdg_config_home: Option<&std::ffi::OsStr>,
+    home: Option<&std::ffi::OsStr>,
+) -> bool {
+    let relative = |base: &std::ffi::OsStr| !Path::new(base).is_absolute();
+    match xdg_config_home.filter(|base| !base.is_empty()) {
+        Some(base) => relative(base),
+        None => home.is_some_and(relative),
+    }
 }
 
 /// Why `GIT_ATTR_SOURCE`, given as `value`, would make the worktrees read attributes
@@ -1340,6 +1363,23 @@ mod tests {
             vec![b"filtered/.gitattributes".to_vec()]
         );
         let _ = std::fs::remove_dir_all(&repo);
+    }
+
+    /// With `core.attributesFile` unset git reads `$XDG_CONFIG_HOME/git/attributes`, or
+    /// `$HOME/.config/git/attributes` where that is unset or empty, and a relative base
+    /// resolves against each worktree's own root.
+    #[test]
+    fn a_relative_default_attributes_file_is_a_mismatch() {
+        let relative = |xdg: Option<&str>, home: Option<&str>| {
+            default_attributes_file_is_relative(xdg.map(OsStr::new), home.map(OsStr::new))
+        };
+        assert!(!relative(None, None));
+        assert!(!relative(Some("/x"), Some("rel")));
+        assert!(relative(Some(".config"), Some("/home/u")));
+        assert!(!relative(None, Some("/home/u")));
+        assert!(relative(None, Some("home")));
+        assert!(relative(Some(""), Some("home")));
+        assert!(!relative(Some(""), Some("/home/u")));
     }
 
     /// `GIT_ATTR_SOURCE`, which `git --attr-source` also sets, names a tree-ish to read
