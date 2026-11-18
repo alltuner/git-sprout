@@ -665,7 +665,7 @@ fn confirm_states<'a>(
         .map(|magic| {
             let pathspec = format!(":(attr:{magic})");
             let matched = git
-                .capture(Some(source), ["ls-files", "-z", "--", &pathspec])
+                .capture_with_pathspec_magic(Some(source), ["ls-files", "-z", "--", &pathspec])
                 .map(|output| {
                     output
                         .split(|byte| *byte == 0)
@@ -1115,6 +1115,52 @@ mod tests {
             .map(|planned| planned.path.as_slice())
             .collect();
         assert_eq!(kept, [b"b.bin".as_slice()]);
+        let _ = std::fs::remove_dir_all(&repo);
+    }
+
+    /// `--literal-pathspecs` turns the `:(attr:-crlf)` confirmation into a file name, and a
+    /// file by that very name would then confirm a `crlf=unset` git ignores. The name holds
+    /// a colon, which Windows does not allow in a file name.
+    #[cfg(unix)]
+    #[test]
+    fn a_confirmation_reads_pathspec_magic_under_literal_pathspecs() {
+        let repo = std::env::temp_dir().join(format!(
+            "git-sprout-literal-pathspecs-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&repo);
+        let git = Git::new(vec!["--literal-pathspecs".into()]);
+        git.capture(
+            None,
+            [OsStr::new("init"), OsStr::new("-q"), repo.as_os_str()],
+        )
+        .expect("git init");
+        let name = ":(attr:-crlf)";
+        std::fs::write(repo.join(".gitattributes"), "* crlf=unset\n*.bin -crlf\n").expect("write");
+        std::fs::write(repo.join(name), "one\ntwo\n").expect("write");
+        // A genuine `-crlf` is still confirmed, so the mode costs no clone.
+        std::fs::write(repo.join("a.bin"), "one\ntwo\n").expect("write");
+        git.capture(Some(&repo), ["add", "--", "."])
+            .expect("git add");
+        git.capture(Some(&repo), ["config", "core.autocrlf", "true"])
+            .expect("git config");
+        let mut paths: Vec<Planned> = [name, "a.bin"]
+            .iter()
+            .map(|name| Planned {
+                path: name.as_bytes().to_vec(),
+                mode: 0o100644,
+                oid: index_oid(&git, &repo, name),
+                mtime: gix_index::entry::stat::Time::default(),
+            })
+            .collect();
+
+        drop_converted_paths(&git, &repo, &repo, &mut paths);
+
+        let kept: Vec<&[u8]> = paths
+            .iter()
+            .map(|planned| planned.path.as_slice())
+            .collect();
+        assert_eq!(kept, [b"a.bin".as_slice()]);
         let _ = std::fs::remove_dir_all(&repo);
     }
 

@@ -47,6 +47,40 @@ impl Git {
         Ok(output.stdout)
     }
 
+    /// Runs git like [`Git::capture`] with pathspec magic in force whatever the caller
+    /// asked for. `--literal-pathspecs`, given as a global option or through
+    /// `GIT_LITERAL_PATHSPECS`, makes git read a pathspec such as `:(attr:-crlf)` as a file
+    /// name; the other pathspec options leave magic alone and are kept.
+    pub fn capture_with_pathspec_magic<I, S>(
+        &self,
+        directory: Option<&Path>,
+        args: I,
+    ) -> io::Result<Vec<u8>>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<OsStr>,
+    {
+        let magic = Git {
+            globals: self
+                .globals
+                .iter()
+                .filter(|global| *global != "--literal-pathspecs")
+                .cloned()
+                .collect(),
+        };
+        let output = magic
+            .command(directory)
+            .env("GIT_LITERAL_PATHSPECS", "0")
+            .args(args)
+            .stdin(Stdio::null())
+            .stderr(Stdio::null())
+            .output()?;
+        if !output.status.success() {
+            return Err(io::Error::other("git exited with a failure status"));
+        }
+        Ok(output.stdout)
+    }
+
     /// Runs git with the caller's stdio, so its output is indistinguishable from ours.
     pub fn passthrough<I, S>(&self, directory: Option<&Path>, args: I) -> io::Result<ExitStatus>
     where
