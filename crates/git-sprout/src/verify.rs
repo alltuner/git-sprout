@@ -27,7 +27,7 @@ fn stat_options() -> stat::Options {
 }
 
 /// Flags that mean git has stopped maintaining, or stopped trusting, an entry's stat data.
-fn entry_is_untrustworthy(flags: gix_index::entry::Flags) -> bool {
+pub fn entry_is_untrustworthy(flags: gix_index::entry::Flags) -> bool {
     use gix_index::entry::Flags;
     flags.intersects(Flags::ASSUME_VALID | Flags::SKIP_WORKTREE | Flags::INTENT_TO_ADD)
 }

@@ -1,7 +1,7 @@
 // ABOUTME: Runs an accelerated `git worktree add`: git creates and finishes the worktree,
 // ABOUTME: and in between the tool clones whatever the source checkout can supply.
 
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::ffi::OsString;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -12,7 +12,7 @@ use gix_index::entry::Stat;
 use gix_index::fs::Metadata;
 
 use crate::argv::AddCommand;
-use crate::attributes::{self, LineEndings};
+use crate::attributes::{self, FilterDrivers, LineEndings, Value};
 use crate::clone::{self, BlockCloner};
 use crate::delegate;
 use crate::git::Git;
@@ -31,9 +31,20 @@ const SYMLINK_MODE: u32 = 0o120000;
 /// The most paths worth naming on one `git diff-files` command line.
 const RACY_PATH_LIMIT: usize = 1000;
 
-/// The configuration that decides how blob bytes become working-tree bytes. Cloning is
-/// only sound when both worktrees resolve all of it the same way.
-const CONVERSION_KEYS: &[&str] = &["core.autocrlf", "core.eol", "core.symlinks"];
+/// The configuration that decides how blob bytes become working-tree bytes, including
+/// where attributes come from and how their patterns match (`core.ignoreCase`). Cloning
+/// is only sound when both worktrees resolve all of it the same way.
+/// Each key comes with the `git config --type` it is read as, so that two spellings of
+/// one value compare equal and two values one spelling hides do not: `git config --get`
+/// prints both a key with no value (true) and an empty one (false) as nothing.
+const CONVERSION_KEYS: &[(&str, Option<&str>)] = &[
+    ("core.autocrlf", Some("bool-or-str")),
+    ("core.eol", Some("bool-or-str")),
+    ("core.symlinks", Some("bool")),
+    ("core.attributesFile", Some("path")),
+    ("attr.tree", None),
+    ("core.ignoreCase", Some("bool")),
+];
 
 /// Creates the worktree, cloning what it can and letting git finish the job.
 pub fn add(command: &AddCommand, stats: &mut Stats) -> ExitCode {
@@ -277,14 +288,25 @@ fn populate(git: &Git, destination: &Path, before: &[source::Worktree], stats: &
         return;
     };
 
-    let (source_attributes, suspect_attributes) =
-        plan::source_attribute_files(&source_index, &source);
-    let dirty_attributes: Vec<Vec<u8>> = changed_paths(git, &source, &suspect_attributes)
-        .into_iter()
-        .collect();
+    let source_attributes = plan::source_attribute_files(&source_index, &source);
+    let mut dirty_attributes: Vec<Vec<u8>> =
+        changed_paths(git, &source, &source_attributes.suspect)
+            .into_iter()
+            .collect();
+    dirty_attributes.extend(source_attributes.untrusted);
+    dirty_attributes.extend(attribute_files_unlike_their_blobs(
+        git,
+        &source,
+        &source_attributes.recorded,
+    ));
+    dirty_attributes.extend(plan::untracked_attribute_files(
+        &target,
+        &source_attributes.recorded,
+        &source,
+    ));
     let mut poisoned = verify::poisoned_prefixes(
         &target.attribute_files(),
-        &source_attributes,
+        &source_attributes.recorded,
         &dirty_attributes,
     );
     let source_paths: Vec<Vec<u8>> = source_index
@@ -311,7 +333,7 @@ fn populate(git: &Git, destination: &Path, before: &[source::Worktree], stats: &
             .cloned(),
     );
     verified.paths.sort_by(|a, b| a.path.cmp(&b.path));
-    drop_converted_paths(git, &source, &mut verified.paths);
+    drop_converted_paths(git, &source, destination, &mut verified.paths);
 
     let plan = plan::assemble(
         &target,
@@ -356,15 +378,79 @@ fn listing(git: &Git, worktree: &Path, commit: &str) -> Option<tree::Listing> {
 
 /// Whether the two worktrees would convert blob bytes differently.
 fn conversion_mismatch(git: &Git, source: &Path, destination: &Path) -> Option<String> {
-    for key in CONVERSION_KEYS {
-        if git.config(source, key) != git.config(destination, key) {
-            return Some(format!("{key} differs between the worktrees"));
+    for (key, kind) in CONVERSION_KEYS {
+        let read = |worktree: &Path| match kind {
+            Some(kind) => git.config_typed(worktree, kind, key).ok(),
+            None => Some(git.config(worktree, key)),
+        };
+        match (read(source), read(destination)) {
+            (Some(source), Some(destination)) if source == destination => {}
+            (Some(_), Some(_)) => {
+                return Some(format!("{key} differs between the worktrees"));
+            }
+            _ => return Some(format!("{key} cannot be read")),
         }
+    }
+    if let Some(reason) =
+        attribute_source_from_environment(std::env::var_os("GIT_ATTR_SOURCE").as_deref())
+    {
+        return Some(reason);
+    }
+    if let Some(reason) = attribute_source_reads_per_worktree(git, source) {
+        return Some(reason);
     }
     let source_attributes = worktree_attributes(git, source);
     let destination_attributes = worktree_attributes(git, destination);
     (source_attributes != destination_attributes)
         .then(|| "the worktrees have different attributes files".to_string())
+}
+
+/// Why a configured attributes source would read differently in each worktree even when
+/// both name it alike, if it would. A relative `core.attributesFile` is a path from the
+/// worktree's root, so each worktree reads its own file, as does an unset one where the
+/// default it stands for is relative (see [`default_attributes_file_is_relative`]). And
+/// `attr.tree` names a tree-ish, which, like `HEAD`, resolves in each worktree's own
+/// history.
+fn attribute_source_reads_per_worktree(git: &Git, worktree: &Path) -> Option<String> {
+    // Read as a path, so that git expands `~` and `%(prefix)/` the way it does when it
+    // opens the file; a `~` under a relative HOME is still relative.
+    match git.config_typed(worktree, "path", "core.attributesFile") {
+        Err(_) => return Some("core.attributesFile cannot be read".to_string()),
+        Ok(Some(file)) if !Path::new(&file).is_absolute() => {
+            return Some("core.attributesFile is relative to each worktree".to_string());
+        }
+        Ok(None)
+            if default_attributes_file_is_relative(
+                std::env::var_os("XDG_CONFIG_HOME").as_deref(),
+                std::env::var_os("HOME").as_deref(),
+            ) =>
+        {
+            return Some("the default attributes file is relative to each worktree".to_string());
+        }
+        _ => {}
+    }
+    git.config(worktree, "attr.tree")
+        .map(|_| "attr.tree names a tree to read attributes from".to_string())
+}
+
+/// Whether the attributes file git reads when `core.attributesFile` is unset,
+/// `$XDG_CONFIG_HOME/git/attributes` or, where that variable is unset or empty,
+/// `$HOME/.config/git/attributes`, is a relative path.
+fn default_attributes_file_is_relative(
+    xdg_config_home: Option<&std::ffi::OsStr>,
+    home: Option<&std::ffi::OsStr>,
+) -> bool {
+    let relative = |base: &std::ffi::OsStr| !Path::new(base).is_absolute();
+    match xdg_config_home.filter(|base| !base.is_empty()) {
+        Some(base) => relative(base),
+        None => home.is_some_and(relative),
+    }
+}
+
+/// Why `GIT_ATTR_SOURCE`, given as `value`, would make the worktrees read attributes
+/// differently, if it would.
+fn attribute_source_from_environment(value: Option<&std::ffi::OsStr>) -> Option<String> {
+    value.map(|_| "GIT_ATTR_SOURCE names a tree to read attributes from".to_string())
 }
 
 /// The contents of a worktree's own `info/attributes`, if it has one.
@@ -383,20 +469,68 @@ fn worktree_attributes(git: &Git, worktree: &Path) -> Option<Vec<u8>> {
     std::fs::read(path).ok()
 }
 
+/// The source's attributes files whose working copy holds other rules than their blob.
+///
+/// Git reads the rules from the working copy. The stat cache, `git diff-files` and the
+/// index flags vouch only for what that copy cleans back to under whatever filter applies
+/// now, so a copy staged through a filter, or one whose filter has since been switched
+/// off, can hold rules its blob does not and still be clean. Each copy is therefore
+/// compared with its blob byte for byte, with CRLF read as LF. A missing copy is alike,
+/// since git then reads the index; one that is not a regular file or cannot be read is
+/// not, and neither is any when git cannot supply the blobs.
+fn attribute_files_unlike_their_blobs(
+    git: &Git,
+    source: &Path,
+    files: &std::collections::BTreeMap<Vec<u8>, gix_hash::ObjectId>,
+) -> Vec<Vec<u8>> {
+    if files.is_empty() {
+        return Vec::new();
+    }
+    let mut request = Vec::new();
+    for oid in files.values() {
+        request.extend_from_slice(oid.to_string().as_bytes());
+        request.push(b'\n');
+    }
+    let Some(blobs) = git
+        .capture_with_input(Some(source), ["cat-file", "--batch"], &request)
+        .ok()
+        .and_then(|output| crate::git::parse_cat_file_batch(&output, files.len()))
+    else {
+        return files.keys().cloned().collect();
+    };
+    files
+        .keys()
+        .zip(blobs)
+        .filter(|(path, blob)| {
+            let copy = source.join(as_path(path));
+            match std::fs::symlink_metadata(&copy) {
+                Err(error) => error.kind() != io::ErrorKind::NotFound,
+                Ok(metadata) if metadata.is_file() => {
+                    std::fs::read(&copy).map_or(true, |bytes| !attributes::same_rules(&bytes, blob))
+                }
+                Ok(_) => true,
+            }
+        })
+        .map(|(path, _)| path.clone())
+        .collect()
+}
+
 /// Removes the paths a checkout would rewrite on its way to the working tree.
 ///
 /// Every remaining path is one where the blob's bytes and the working tree's bytes are the
 /// same thing, which is what makes the index stat cache a sufficient answer. The
 /// attributes are read from the source, which is sound because the plan has already
-/// established that both sides carry the same attribute blobs.
-fn drop_converted_paths(git: &Git, source: &Path, paths: &mut Vec<Planned>) {
+/// established that both sides carry the same attribute blobs. The filter drivers are read
+/// from both, because a configuration include can give the destination a driver the
+/// source lacks.
+fn drop_converted_paths(git: &Git, source: &Path, destination: &Path, paths: &mut Vec<Planned>) {
     if paths.is_empty() {
         return;
     }
-    let endings = LineEndings::from_config(
-        git.config(source, "core.autocrlf").as_deref(),
-        git.config(source, "core.eol").as_deref(),
-    );
+    let Ok(endings) = line_endings(git, source) else {
+        paths.clear();
+        return;
+    };
     let mut request = Vec::new();
     for planned in paths.iter() {
         request.extend_from_slice(&planned.path);
@@ -409,10 +543,154 @@ fn drop_converted_paths(git: &Git, source: &Path, paths: &mut Vec<Planned>) {
         return;
     };
     let reported = attributes::parse_check_attr(&output);
-    paths.retain(|planned| match reported.get(&planned.path) {
-        Some(values) => !attributes::converts(values, endings),
-        None => false,
+    let decide = |values: &HashMap<String, Value>| attributes::converts(values, endings);
+    let drivers = filter_drivers(git, source).or(filter_drivers(git, destination));
+    let confirmed = confirm_states(
+        git,
+        source,
+        paths.iter().map(|planned| planned.path.as_slice()),
+        &reported,
+        drivers,
+        decide,
+    );
+    let mut binary = HashSet::new();
+    paths.retain(|planned| {
+        let Some(values) = reported.get(&planned.path) else {
+            return false;
+        };
+        let values = attributes::resolve_ambiguous(values, drivers, |magic| {
+            confirmed
+                .get(magic)
+                .is_some_and(|matched| matched.contains(&planned.path))
+        });
+        let keep = !decide(&values);
+        if keep && attributes::marks_binary(&values) {
+            binary.insert(planned.path.clone());
+        }
+        keep
     });
+    drop_resized_binary_paths(git, source, paths, &binary);
+}
+
+/// Removes the paths an attribute marks binary whose source file is not the size of its
+/// blob.
+///
+/// A binary path is checked out as its blob's bytes, so a clean copy of one is those
+/// bytes. The stat cache says only that nothing touched the file since git last looked,
+/// and an attribute that changed since then leaves it vouching for bytes written under the
+/// old one: a file added as `text` under core.autocrlf=true keeps its CRLF once `-crlf`
+/// or `-text` lands, and git still calls it clean. Line endings rewritten either way
+/// change the size, which `git cat-file --batch-check` reports without reading the blob.
+/// A symlink entry is checked too unless the source holds a real link, since with
+/// core.symlinks=false it is a regular file cloned like any other. A git that cannot
+/// report the sizes leaves every such path to git.
+fn drop_resized_binary_paths(
+    git: &Git,
+    source: &Path,
+    paths: &mut Vec<Planned>,
+    binary: &HashSet<Vec<u8>>,
+) {
+    let checked: Vec<(Vec<u8>, gix_hash::ObjectId)> = paths
+        .iter()
+        .filter(|planned| binary.contains(&planned.path))
+        .map(|planned| (planned.path.clone(), planned.oid))
+        .collect();
+    if checked.is_empty() {
+        return;
+    }
+    let mut request = Vec::new();
+    for (_, oid) in &checked {
+        request.extend_from_slice(oid.to_string().as_bytes());
+        request.push(b'\n');
+    }
+    let sizes = git
+        .capture_with_input(Some(source), ["cat-file", "--batch-check"], &request)
+        .ok()
+        .and_then(|output| crate::git::parse_cat_file_batch_check(&output, checked.len()));
+    let resized: HashSet<Vec<u8>> = match sizes {
+        None => checked.into_iter().map(|(path, _)| path).collect(),
+        Some(sizes) => checked
+            .into_iter()
+            .zip(sizes)
+            .filter(|((path, _), size)| {
+                match std::fs::symlink_metadata(source.join(as_path(path))) {
+                    // A real link is cloned as a link, never through a conversion.
+                    Ok(metadata) if metadata.file_type().is_symlink() => false,
+                    Ok(metadata) => metadata.len() != *size,
+                    Err(_) => true,
+                }
+            })
+            .map(|((path, _), _)| path)
+            .collect(),
+    };
+    paths.retain(|planned| !resized.contains(&planned.path));
+}
+
+/// Which of the words `git check-attr` prints for a state name a filter driver configured
+/// for `worktree`. A git that cannot answer is taken to have both, which leaves every such
+/// state to be confirmed.
+fn filter_drivers(git: &Git, worktree: &Path) -> FilterDrivers {
+    match git.config_names(worktree, r"^filter\.(unset|unspecified)\.") {
+        Ok(names) => FilterDrivers::from_config_names(names.iter().map(String::as_str)),
+        Err(_) => FilterDrivers {
+            unset: true,
+            unspecified: true,
+        },
+    }
+}
+
+/// For each ambiguous state some path reports that `decide` depends on, the paths git
+/// matches with the `attr` pathspec magic for it.
+///
+/// `git check-attr` prints `unset` both for `-name` and for the string value `unset`,
+/// and `unspecified` both for no setting and for the string `unspecified`, which git can
+/// read differently. The pathspec magic tells them apart: `:(attr:-name)` matches only
+/// `-name`, and `:(attr:!name)` only no setting. A git that cannot answer confirms
+/// nothing, and every such state is then read as the string.
+fn confirm_states<'a>(
+    git: &Git,
+    source: &Path,
+    paths: impl IntoIterator<Item = &'a [u8]>,
+    reported: &HashMap<Vec<u8>, HashMap<String, Value>>,
+    drivers: FilterDrivers,
+    decide: impl Fn(&HashMap<String, Value>) -> bool + Copy,
+) -> HashMap<String, HashSet<Vec<u8>>> {
+    let magic: BTreeSet<String> = paths
+        .into_iter()
+        .filter_map(|path| reported.get(path))
+        .flat_map(|values| attributes::ambiguous_to_confirm(values, drivers, decide))
+        .collect();
+    magic
+        .into_iter()
+        .map(|magic| {
+            let pathspec = format!(":(attr:{magic})");
+            let matched = git
+                .capture_with_pathspec_magic(Some(source), ["ls-files", "-z", "--", &pathspec])
+                .map(|output| {
+                    output
+                        .split(|byte| *byte == 0)
+                        .filter(|path| !path.is_empty())
+                        .map(<[u8]>::to_vec)
+                        .collect()
+                })
+                .unwrap_or_default();
+            (magic, matched)
+        })
+        .collect()
+}
+
+/// The line-ending options as git reads them. `core.autocrlf` is a boolean or `input`,
+/// and git accepts every boolean spelling for it, so git canonicalises it here rather than
+/// this matching one spelling. `core.eol` goes through the same reading, which leaves
+/// `lf`, `crlf` and `native` as written. An option git cannot be asked about is an
+/// error, and the caller then clones nothing it would have to judge.
+fn line_endings(git: &Git, source: &Path) -> io::Result<LineEndings> {
+    let autocrlf = git.config_typed(source, "bool-or-str", "core.autocrlf")?;
+    let eol = git.config_typed(source, "bool-or-str", "core.eol")?;
+    Ok(LineEndings::from_config(
+        autocrlf.as_deref(),
+        eol.as_deref(),
+    ))
 }
 
 /// Asks git which of these paths really differ from what the index records.
@@ -642,6 +920,7 @@ fn umask() -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::ffi::OsStr;
 
     #[test]
     fn permissions_come_from_the_tree_and_the_umask() {
@@ -651,6 +930,597 @@ mod tests {
         assert_eq!(checkout_mode(0o100755, 0o077), 0o700);
         assert_eq!(checkout_mode(0o100644, 0o000), 0o666);
         assert_eq!(directory_mode(0o022), 0o755);
+    }
+
+    /// Git reads `core.autocrlf` as a boolean and `core.eol` without regard to case, so
+    /// every spelling it accepts has to reach the plan as what it means, or a path is
+    /// cloned with LF where a checkout writes CRLF. Real git does the reading here, because
+    /// the reading is git's to make.
+    #[test]
+    fn line_endings_read_every_spelling_git_accepts() {
+        let repo =
+            std::env::temp_dir().join(format!("git-sprout-line-endings-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&repo);
+        let git = Git::new(Vec::new());
+        git.capture(
+            None,
+            [OsStr::new("init"), OsStr::new("-q"), repo.as_os_str()],
+        )
+        .expect("git init");
+        let read = |autocrlf: Option<&str>, eol: Option<&str>| {
+            for (key, value) in [("core.autocrlf", autocrlf), ("core.eol", eol)] {
+                let _ = git.capture(Some(&repo), ["config", "--unset-all", key]);
+                if let Some(value) = value {
+                    git.capture(Some(&repo), ["config", key, value])
+                        .expect("git config");
+                }
+            }
+            line_endings(&git, &repo).expect("git answers")
+        };
+
+        for spelling in ["true", "yes", "on", "1", "TRUE", "input", "INPUT"] {
+            assert!(
+                read(Some(spelling), None).autocrlf,
+                "core.autocrlf={spelling}"
+            );
+        }
+        for spelling in ["false", "no", "off", "0", "FALSE", ""] {
+            assert!(
+                !read(Some(spelling), None).autocrlf,
+                "core.autocrlf={spelling}"
+            );
+        }
+        for spelling in ["crlf", "CRLF", "bogus"] {
+            assert!(read(None, Some(spelling)).crlf, "core.eol={spelling}");
+        }
+        for spelling in ["lf", "LF", "native", "Native"] {
+            assert!(!read(None, Some(spelling)).crlf, "core.eol={spelling}");
+        }
+
+        // A key with no value at all is `true` to git.
+        let _ = git.capture(Some(&repo), ["config", "--unset-all", "core.autocrlf"]);
+        let config = repo.join(".git").join("config");
+        let mut text = std::fs::read_to_string(&config).expect("read config");
+        text.push_str("[core]\n\tautocrlf\n");
+        std::fs::write(&config, text).expect("write config");
+        assert!(line_endings(&git, &repo).expect("git answers").autocrlf);
+
+        let _ = std::fs::remove_dir_all(&repo);
+    }
+
+    /// `git check-attr` prints `unset` both for `-crlf` and for the string value
+    /// `crlf=unset`, and the same for `text`. Git ignores the string and applies
+    /// core.autocrlf, which writes CRLF, so only a genuine `-crlf` or `-text` may keep a
+    /// path out of git's hands. It prints `unspecified` both for no `filter` and for
+    /// `filter=unspecified`, which names a configured driver. Real git does the reading
+    /// here, because the reading is git's to make.
+    #[test]
+    fn only_a_genuine_unset_keeps_a_path_from_core_autocrlf() {
+        let repo =
+            std::env::temp_dir().join(format!("git-sprout-unset-string-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&repo);
+        let git = Git::new(Vec::new());
+        git.capture(
+            None,
+            [OsStr::new("init"), OsStr::new("-q"), repo.as_os_str()],
+        )
+        .expect("git init");
+        std::fs::write(
+            repo.join(".gitattributes"),
+            "*.crlf-string crlf=unset\n\
+             *.crlf-unset -crlf\n\
+             *.text-string text=unset\n\
+             *.text-unset -text\n\
+             *.text-string-crlf-unset text=unset -crlf\n\
+             *.text-unset-crlf-string -text crlf=unset\n\
+             *.both-string text=unset crlf=unset\n\
+             *.filter-string -crlf filter=unspecified\n",
+        )
+        .expect("write attributes");
+        let names = [
+            "a.crlf-string",
+            "a.crlf-unset",
+            "a.text-string",
+            "a.text-unset",
+            "a.text-string-crlf-unset",
+            "a.text-unset-crlf-string",
+            "a.both-string",
+            "a.filter-string",
+        ];
+        for name in names {
+            std::fs::write(repo.join(name), "one\ntwo\n").expect("write file");
+        }
+        git.capture(Some(&repo), ["add", "--", "."])
+            .expect("git add");
+        git.capture(Some(&repo), ["config", "core.autocrlf", "true"])
+            .expect("git config");
+        // A driver named `unspecified`, which `filter=unspecified` names as a string.
+        git.capture(Some(&repo), ["config", "filter.unspecified.smudge", "cat"])
+            .expect("git config");
+        let mut paths: Vec<Planned> = names
+            .iter()
+            .map(|name| Planned {
+                path: name.as_bytes().to_vec(),
+                mode: 0o100644,
+                oid: index_oid(&git, &repo, name),
+                mtime: gix_index::entry::stat::Time::default(),
+            })
+            .collect();
+
+        drop_converted_paths(&git, &repo, &repo, &mut paths);
+
+        let kept: Vec<&[u8]> = paths
+            .iter()
+            .map(|planned| planned.path.as_slice())
+            .collect();
+        assert_eq!(
+            kept,
+            [
+                b"a.crlf-unset".as_slice(),
+                b"a.text-unset",
+                b"a.text-string-crlf-unset",
+                b"a.text-unset-crlf-string",
+            ]
+        );
+        let _ = std::fs::remove_dir_all(&repo);
+    }
+
+    /// The blob id the index at `repo` records for `name`.
+    fn index_oid(git: &Git, repo: &Path, name: &str) -> gix_hash::ObjectId {
+        let hex = git
+            .capture_line(Some(repo), ["rev-parse", &format!(":{name}")])
+            .expect("git rev-parse");
+        gix_hash::ObjectId::from_hex(hex.as_bytes()).expect("object id")
+    }
+
+    /// A path an attribute marks binary is checked out as its blob, so a clean copy of it
+    /// is the blob's bytes, but the stat cache only says nothing touched the file since git
+    /// last looked. A file added as `text` under core.autocrlf=true keeps the CRLF it was
+    /// written with after `-crlf` (or `-text`) lands, and git still calls it clean.
+    #[test]
+    fn a_binary_copy_written_under_an_earlier_rule_is_left_to_git() {
+        let repo =
+            std::env::temp_dir().join(format!("git-sprout-stale-binary-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&repo);
+        let git = Git::new(Vec::new());
+        git.capture(
+            None,
+            [OsStr::new("init"), OsStr::new("-q"), repo.as_os_str()],
+        )
+        .expect("git init");
+        git.capture(Some(&repo), ["config", "core.autocrlf", "true"])
+            .expect("git config");
+        std::fs::write(repo.join(".gitattributes"), "*.txt text\n").expect("write");
+        std::fs::write(repo.join("a.txt"), "one\r\ntwo\r\n").expect("write");
+        std::fs::write(repo.join("b.bin"), "one\ntwo\n").expect("write");
+        git.capture(Some(&repo), ["add", "--", "."])
+            .expect("git add");
+        std::fs::write(repo.join(".gitattributes"), "*.txt -crlf\n*.bin -text\n").expect("write");
+        git.capture(Some(&repo), ["add", "--", ".gitattributes"])
+            .expect("git add");
+        let mut paths: Vec<Planned> = ["a.txt", "b.bin"]
+            .iter()
+            .map(|name| Planned {
+                path: name.as_bytes().to_vec(),
+                mode: 0o100644,
+                oid: index_oid(&git, &repo, name),
+                mtime: gix_index::entry::stat::Time::default(),
+            })
+            .collect();
+
+        drop_converted_paths(&git, &repo, &repo, &mut paths);
+
+        let kept: Vec<&[u8]> = paths
+            .iter()
+            .map(|planned| planned.path.as_slice())
+            .collect();
+        assert_eq!(kept, [b"b.bin".as_slice()]);
+        let _ = std::fs::remove_dir_all(&repo);
+    }
+
+    /// `--literal-pathspecs` turns the `:(attr:-crlf)` confirmation into a file name, and a
+    /// file by that very name would then confirm a `crlf=unset` git ignores. The name holds
+    /// a colon, which Windows does not allow in a file name.
+    #[cfg(unix)]
+    #[test]
+    fn a_confirmation_reads_pathspec_magic_under_literal_pathspecs() {
+        let repo = std::env::temp_dir().join(format!(
+            "git-sprout-literal-pathspecs-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&repo);
+        let git = Git::new(vec!["--literal-pathspecs".into()]);
+        git.capture(
+            None,
+            [OsStr::new("init"), OsStr::new("-q"), repo.as_os_str()],
+        )
+        .expect("git init");
+        let name = ":(attr:-crlf)";
+        std::fs::write(repo.join(".gitattributes"), "* crlf=unset\n*.bin -crlf\n").expect("write");
+        std::fs::write(repo.join(name), "one\ntwo\n").expect("write");
+        // A genuine `-crlf` is still confirmed, so the mode costs no clone.
+        std::fs::write(repo.join("a.bin"), "one\ntwo\n").expect("write");
+        git.capture(Some(&repo), ["add", "--", "."])
+            .expect("git add");
+        git.capture(Some(&repo), ["config", "core.autocrlf", "true"])
+            .expect("git config");
+        let mut paths: Vec<Planned> = [name, "a.bin"]
+            .iter()
+            .map(|name| Planned {
+                path: name.as_bytes().to_vec(),
+                mode: 0o100644,
+                oid: index_oid(&git, &repo, name),
+                mtime: gix_index::entry::stat::Time::default(),
+            })
+            .collect();
+
+        drop_converted_paths(&git, &repo, &repo, &mut paths);
+
+        let kept: Vec<&[u8]> = paths
+            .iter()
+            .map(|planned| planned.path.as_slice())
+            .collect();
+        assert_eq!(kept, [b"a.bin".as_slice()]);
+        let _ = std::fs::remove_dir_all(&repo);
+    }
+
+    /// With core.symlinks=false a symlink entry is a regular file holding the link's
+    /// target, cloned like any other file, so the size check applies to it as well.
+    #[test]
+    fn a_symlink_placeholder_is_size_checked_like_a_file() {
+        let repo = std::env::temp_dir().join(format!(
+            "git-sprout-link-placeholder-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&repo);
+        let git = Git::new(Vec::new());
+        git.capture(
+            None,
+            [OsStr::new("init"), OsStr::new("-q"), repo.as_os_str()],
+        )
+        .expect("git init");
+        for args in [
+            &["config", "core.symlinks", "false"][..],
+            &["config", "core.autocrlf", "true"],
+        ] {
+            git.capture(Some(&repo), args).expect("git config");
+        }
+        std::fs::write(repo.join(".gitattributes"), "*.txt -crlf\n").expect("write");
+        let oid = git
+            .capture_with_input(Some(&repo), ["hash-object", "-w", "--stdin"], b"a/target")
+            .expect("git hash-object");
+        let oid = String::from_utf8(oid).expect("hex").trim().to_string();
+        git.capture(
+            Some(&repo),
+            [
+                "update-index",
+                "--add",
+                "--cacheinfo",
+                &format!("120000,{oid},link.txt"),
+            ],
+        )
+        .expect("git update-index");
+        // The placeholder holds the target with CRLF, as an earlier `text` rule left it.
+        std::fs::write(repo.join("link.txt"), "a/target\r\n").expect("write");
+        let mut paths = vec![Planned {
+            path: b"link.txt".to_vec(),
+            mode: SYMLINK_MODE,
+            oid: gix_hash::ObjectId::from_hex(oid.as_bytes()).expect("object id"),
+            mtime: gix_index::entry::stat::Time::default(),
+        }];
+
+        drop_converted_paths(&git, &repo, &repo, &mut paths);
+
+        assert!(paths.is_empty());
+        let _ = std::fs::remove_dir_all(&repo);
+    }
+
+    /// An include can name an attributes file, or a tree to read attributes from, for the
+    /// destination alone, such as one `includeIf.onbranch` adds for its branch. Git reads it
+    /// when it checks the destination out, so the source's attributes are then no guide to
+    /// what the checkout writes.
+    #[test]
+    fn attribute_sources_the_worktrees_read_differently_are_a_mismatch() {
+        let scratch = std::env::temp_dir().join(format!(
+            "git-sprout-branch-attributes-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&scratch);
+        let (repo, destination) = (scratch.join("repo"), scratch.join("destination"));
+        let git = Git::new(Vec::new());
+        git.capture(
+            None,
+            [OsStr::new("init"), OsStr::new("-q"), repo.as_os_str()],
+        )
+        .expect("git init");
+        std::fs::write(repo.join("a.txt"), "one\n").expect("write file");
+        for args in [
+            &["add", "--", "."][..],
+            &[
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@example.invalid",
+                "commit",
+                "-q",
+                "--no-gpg-sign",
+                "-m",
+                "base",
+            ],
+            &["checkout", "-q", "--detach"],
+            &[
+                "config",
+                "includeIf.onbranch:topic.path",
+                "topic-attributes",
+            ],
+        ] {
+            git.capture(Some(&repo), args).expect("git");
+        }
+        git.capture(
+            Some(&repo),
+            [
+                OsStr::new("worktree"),
+                OsStr::new("add"),
+                OsStr::new("-q"),
+                OsStr::new("--no-checkout"),
+                OsStr::new("-b"),
+                OsStr::new("topic"),
+                destination.as_os_str(),
+            ],
+        )
+        .expect("git worktree add");
+        let include = repo.join(".git").join("topic-attributes");
+
+        assert_eq!(conversion_mismatch(&git, &repo, &destination), None);
+        for (section, key, value) in [
+            ("core", "attributesFile", "topic.attributes"),
+            ("attr", "tree", "HEAD"),
+            ("core", "ignoreCase", "false"),
+        ] {
+            std::fs::write(&include, format!("[{section}]\n\t{key} = {value}\n"))
+                .expect("write include");
+            assert_eq!(
+                conversion_mismatch(&git, &repo, &destination),
+                Some(format!("{section}.{key} differs between the worktrees")),
+            );
+        }
+        std::fs::write(&include, "").expect("clear include");
+
+        // Git reads a boolean however it is spelled: a key with no value is true and an
+        // empty value false, though `git config --get` prints both as nothing.
+        let _ = git.capture(Some(&repo), ["config", "--unset-all", "core.ignoreCase"]);
+        let config = repo.join(".git").join("config");
+        let mut text = std::fs::read_to_string(&config).expect("read config");
+        text.push_str("[core]\n\tignoreCase\n");
+        std::fs::write(&config, text).expect("write config");
+        // The include has to come after the key to override it.
+        for args in [
+            &["config", "--remove-section", "includeIf.onbranch:topic"][..],
+            &[
+                "config",
+                "includeIf.onbranch:topic.path",
+                "topic-attributes",
+            ],
+        ] {
+            git.capture(Some(&repo), args).expect("git config");
+        }
+        std::fs::write(&include, "[core]\n\tignoreCase =\n").expect("write include");
+        assert_eq!(
+            conversion_mismatch(&git, &repo, &destination),
+            Some("core.ignoreCase differs between the worktrees".to_string()),
+        );
+        std::fs::write(&include, "").expect("clear include");
+        let _ = git.capture(Some(&repo), ["config", "--unset-all", "core.ignoreCase"]);
+
+        // The same relative name selects a file in each worktree's own root, and the same
+        // tree-ish, such as `HEAD`, a tree in each worktree's own history.
+        let shared = |key: &str, value: &str| {
+            git.capture(Some(&repo), ["config", key, value])
+                .expect("git config");
+        };
+        shared("core.attributesFile", "local.attributes");
+        assert_eq!(
+            conversion_mismatch(&git, &repo, &destination),
+            Some("core.attributesFile is relative to each worktree".to_string()),
+        );
+        let absolute = scratch.join("shared.attributes");
+        shared("core.attributesFile", &absolute.to_string_lossy());
+        assert_eq!(conversion_mismatch(&git, &repo, &destination), None);
+        shared("core.attributesFile", "~/shared.attributes");
+        assert_eq!(conversion_mismatch(&git, &repo, &destination), None);
+        shared("attr.tree", "HEAD");
+        assert_eq!(
+            conversion_mismatch(&git, &repo, &destination),
+            Some("attr.tree names a tree to read attributes from".to_string()),
+        );
+        let _ = std::fs::remove_dir_all(&scratch);
+    }
+
+    /// Git reads an attributes file's rules from its working copy, and nothing the index
+    /// keeps vouches for that copy's raw bytes: one staged through a clean filter that has
+    /// since been switched off is clean to git and holds other rules than its blob. A copy
+    /// that differs only in line endings holds the same rules, since git's attribute parser
+    /// takes CR for a blank, and git reads a missing copy from the index.
+    #[test]
+    fn attributes_files_unlike_their_blobs_are_reported() {
+        let repo = std::env::temp_dir().join(format!(
+            "git-sprout-unlike-attributes-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&repo);
+        let git = Git::new(Vec::new());
+        git.capture(
+            None,
+            [OsStr::new("init"), OsStr::new("-q"), repo.as_os_str()],
+        )
+        .expect("git init");
+        for (directory, rules) in [
+            ("filtered", "*.txt text\n.gitattributes filter=rules\n"),
+            ("crlf", "*.txt text\n"),
+            ("gone", "*.txt text\n"),
+            ("same", "*.txt -text\n"),
+        ] {
+            std::fs::create_dir_all(repo.join(directory)).expect("mkdir");
+            std::fs::write(repo.join(directory).join(".gitattributes"), rules).expect("write");
+        }
+        for args in [
+            &["config", "filter.rules.clean", "sed s/-crlf/text/g"][..],
+            &["add", "--", "."],
+            &[
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@example.invalid",
+                "commit",
+                "-q",
+                "--no-gpg-sign",
+                "-m",
+                "base",
+            ],
+        ] {
+            git.capture(Some(&repo), args).expect("git");
+        }
+        std::fs::write(
+            repo.join("filtered/.gitattributes"),
+            "*.txt -crlf\n.gitattributes filter=rules\n",
+        )
+        .expect("write");
+        git.capture(Some(&repo), ["add", "--", "filtered/.gitattributes"])
+            .expect("git add");
+        std::fs::write(
+            repo.join(".git/info/attributes"),
+            "filtered/.gitattributes -filter\n",
+        )
+        .expect("write info/attributes");
+        std::fs::write(repo.join("crlf/.gitattributes"), "*.txt text\r\n").expect("write");
+        std::fs::remove_file(repo.join("gone/.gitattributes")).expect("remove");
+        let index = gix_index::File::at(
+            repo.join(".git").join("index"),
+            gix_hash::Kind::Sha1,
+            true,
+            gix_index::decode::Options::default(),
+        )
+        .expect("read index");
+        let recorded = plan::source_attribute_files(&index, &repo).recorded;
+        assert_eq!(recorded.len(), 4);
+
+        assert_eq!(
+            attribute_files_unlike_their_blobs(&git, &repo, &recorded),
+            vec![b"filtered/.gitattributes".to_vec()]
+        );
+        let _ = std::fs::remove_dir_all(&repo);
+    }
+
+    /// With `core.attributesFile` unset git reads `$XDG_CONFIG_HOME/git/attributes`, or
+    /// `$HOME/.config/git/attributes` where that is unset or empty, and a relative base
+    /// resolves against each worktree's own root.
+    #[test]
+    fn a_relative_default_attributes_file_is_a_mismatch() {
+        let relative = |xdg: Option<&OsStr>, home: Option<&OsStr>| {
+            default_attributes_file_is_relative(xdg, home)
+        };
+        // An absolute path in this platform's own form: `/x` has no drive on Windows.
+        let absolute = std::env::temp_dir();
+        let absolute = Some(absolute.as_os_str());
+        let rel = |path: &'static str| Some(OsStr::new(path));
+        assert!(!relative(None, None));
+        assert!(!relative(absolute, rel("home")));
+        assert!(relative(rel(".config"), absolute));
+        assert!(!relative(None, absolute));
+        assert!(relative(None, rel("home")));
+        assert!(relative(rel(""), rel("home")));
+        assert!(!relative(rel(""), absolute));
+    }
+
+    /// `GIT_ATTR_SOURCE`, which `git --attr-source` also sets, names a tree-ish to read
+    /// attributes from in place of the working tree, and one such as `HEAD` resolves in
+    /// each worktree's own history.
+    #[test]
+    fn a_tree_named_in_the_environment_is_a_mismatch() {
+        assert_eq!(attribute_source_from_environment(None), None);
+        assert_eq!(
+            attribute_source_from_environment(Some(OsStr::new("HEAD"))),
+            Some("GIT_ATTR_SOURCE names a tree to read attributes from".to_string()),
+        );
+    }
+
+    /// Git reads the destination's configuration when it checks the destination out, and
+    /// an include can give it a filter driver the source does not see, such as one
+    /// `includeIf.onbranch` adds for the destination's branch alone. The words
+    /// `git check-attr` shares with string values are then ambiguous on that side too.
+    #[test]
+    fn a_driver_only_the_destination_sees_is_honoured() {
+        let scratch =
+            std::env::temp_dir().join(format!("git-sprout-branch-driver-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&scratch);
+        let (repo, destination) = (scratch.join("repo"), scratch.join("destination"));
+        let git = Git::new(Vec::new());
+        git.capture(
+            None,
+            [OsStr::new("init"), OsStr::new("-q"), repo.as_os_str()],
+        )
+        .expect("git init");
+        std::fs::write(
+            repo.join(".gitattributes"),
+            "*.filter-string -crlf filter=unspecified\n*.crlf-unset -crlf\n",
+        )
+        .expect("write attributes");
+        for name in ["a.filter-string", "a.crlf-unset"] {
+            std::fs::write(repo.join(name), "one\ntwo\n").expect("write file");
+        }
+        for args in [
+            &["add", "--", "."][..],
+            &[
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@example.invalid",
+                "commit",
+                "-q",
+                "--no-gpg-sign",
+                "-m",
+                "base",
+            ],
+            &["checkout", "-q", "--detach"],
+            &["config", "core.autocrlf", "true"],
+            &["config", "includeIf.onbranch:topic.path", "topic-drivers"],
+        ] {
+            git.capture(Some(&repo), args).expect("git");
+        }
+        std::fs::write(
+            repo.join(".git").join("topic-drivers"),
+            "[filter \"unspecified\"]\n\tsmudge = cat\n",
+        )
+        .expect("write include");
+        git.capture(
+            Some(&repo),
+            [
+                OsStr::new("worktree"),
+                OsStr::new("add"),
+                OsStr::new("-q"),
+                OsStr::new("--no-checkout"),
+                OsStr::new("-b"),
+                OsStr::new("topic"),
+                destination.as_os_str(),
+            ],
+        )
+        .expect("git worktree add");
+        let planned = |name: &str| Planned {
+            path: name.as_bytes().to_vec(),
+            mode: 0o100644,
+            oid: index_oid(&git, &repo, name),
+            mtime: gix_index::entry::stat::Time::default(),
+        };
+        let mut paths = vec![planned("a.crlf-unset"), planned("a.filter-string")];
+
+        drop_converted_paths(&git, &repo, &destination, &mut paths);
+
+        let kept: Vec<&[u8]> = paths
+            .iter()
+            .map(|planned| planned.path.as_slice())
+            .collect();
+        assert_eq!(kept, [b"a.crlf-unset".as_slice()]);
+        let _ = std::fs::remove_dir_all(&scratch);
     }
 
     #[test]
