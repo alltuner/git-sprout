@@ -80,7 +80,9 @@ for n in range(files):
     directory = os.path.join(root, "group%d" % (n % groups))
     os.makedirs(directory, exist_ok=True)
     name = "file%d.txt" % n
-    with open(os.path.join(directory, name), "w") as handle:
+    # LF on every platform: text mode would write CRLF on Windows, and the fixtures that
+    # check the working copies for LF would then refuse to build there.
+    with open(os.path.join(directory, name), "w", newline="\n") as handle:
         for line in range(1, lines + 1):
             handle.write("line %d of %s\n" % (line, name))
 TREE
