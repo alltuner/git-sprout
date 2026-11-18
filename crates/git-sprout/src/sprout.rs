@@ -412,18 +412,18 @@ fn conversion_mismatch(git: &Git, source: &Path, destination: &Path) -> Option<S
 /// `attr.tree` names a tree-ish, which, like `HEAD`, resolves in each worktree's own
 /// history.
 fn attribute_source_reads_per_worktree(git: &Git, worktree: &Path) -> Option<String> {
-    match git.config(worktree, "core.attributesFile") {
-        Some(file)
-            if !(Path::new(&file).is_absolute()
-                || file.starts_with('~')
-                || file.starts_with("%(prefix)/")) =>
-        {
+    // Read as a path, so that git expands `~` and `%(prefix)/` the way it does when it
+    // opens the file; a `~` under a relative HOME is still relative.
+    match git.config_typed(worktree, "path", "core.attributesFile") {
+        Err(_) => return Some("core.attributesFile cannot be read".to_string()),
+        Ok(Some(file)) if !Path::new(&file).is_absolute() => {
             return Some("core.attributesFile is relative to each worktree".to_string());
         }
-        None if default_attributes_file_is_relative(
-            std::env::var_os("XDG_CONFIG_HOME").as_deref(),
-            std::env::var_os("HOME").as_deref(),
-        ) =>
+        Ok(None)
+            if default_attributes_file_is_relative(
+                std::env::var_os("XDG_CONFIG_HOME").as_deref(),
+                std::env::var_os("HOME").as_deref(),
+            ) =>
         {
             return Some("the default attributes file is relative to each worktree".to_string());
         }
