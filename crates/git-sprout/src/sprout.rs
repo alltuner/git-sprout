@@ -1370,16 +1370,20 @@ mod tests {
     /// resolves against each worktree's own root.
     #[test]
     fn a_relative_default_attributes_file_is_a_mismatch() {
-        let relative = |xdg: Option<&str>, home: Option<&str>| {
-            default_attributes_file_is_relative(xdg.map(OsStr::new), home.map(OsStr::new))
+        let relative = |xdg: Option<&OsStr>, home: Option<&OsStr>| {
+            default_attributes_file_is_relative(xdg, home)
         };
+        // An absolute path in this platform's own form: `/x` has no drive on Windows.
+        let absolute = std::env::temp_dir();
+        let absolute = Some(absolute.as_os_str());
+        let rel = |path: &'static str| Some(OsStr::new(path));
         assert!(!relative(None, None));
-        assert!(!relative(Some("/x"), Some("rel")));
-        assert!(relative(Some(".config"), Some("/home/u")));
-        assert!(!relative(None, Some("/home/u")));
-        assert!(relative(None, Some("home")));
-        assert!(relative(Some(""), Some("home")));
-        assert!(!relative(Some(""), Some("/home/u")));
+        assert!(!relative(absolute, rel("home")));
+        assert!(relative(rel(".config"), absolute));
+        assert!(!relative(None, absolute));
+        assert!(relative(None, rel("home")));
+        assert!(relative(rel(""), rel("home")));
+        assert!(!relative(rel(""), absolute));
     }
 
     /// `GIT_ATTR_SOURCE`, which `git --attr-source` also sets, names a tree-ish to read
