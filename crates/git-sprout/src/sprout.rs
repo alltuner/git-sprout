@@ -558,7 +558,9 @@ fn drop_converted_paths(git: &Git, source: &Path, destination: &Path, paths: &mu
 /// old one: a file added as `text` under core.autocrlf=true keeps its CRLF once `-crlf`
 /// or `-text` lands, and git still calls it clean. Line endings rewritten either way
 /// change the size, which `git cat-file --batch-check` reports without reading the blob.
-/// A git that cannot report the sizes leaves every such path to git.
+/// A symlink entry is checked too unless the source holds a real link, since with
+/// core.symlinks=false it is a regular file cloned like any other. A git that cannot
+/// report the sizes leaves every such path to git.
 fn drop_resized_binary_paths(
     git: &Git,
     source: &Path,
@@ -567,7 +569,7 @@ fn drop_resized_binary_paths(
 ) {
     let checked: Vec<(Vec<u8>, gix_hash::ObjectId)> = paths
         .iter()
-        .filter(|planned| planned.mode != SYMLINK_MODE && binary.contains(&planned.path))
+        .filter(|planned| binary.contains(&planned.path))
         .map(|planned| (planned.path.clone(), planned.oid))
         .collect();
     if checked.is_empty() {
@@ -588,8 +590,12 @@ fn drop_resized_binary_paths(
             .into_iter()
             .zip(sizes)
             .filter(|((path, _), size)| {
-                std::fs::symlink_metadata(source.join(as_path(path)))
-                    .map_or(true, |metadata| metadata.len() != *size)
+                match std::fs::symlink_metadata(source.join(as_path(path))) {
+                    // A real link is cloned as a link, never through a conversion.
+                    Ok(metadata) if metadata.file_type().is_symlink() => false,
+                    Ok(metadata) => metadata.len() != *size,
+                    Err(_) => true,
+                }
             })
             .map(|((path, _), _)| path)
             .collect(),
@@ -1086,6 +1092,57 @@ mod tests {
             .map(|planned| planned.path.as_slice())
             .collect();
         assert_eq!(kept, [b"b.bin".as_slice()]);
+        let _ = std::fs::remove_dir_all(&repo);
+    }
+
+    /// With core.symlinks=false a symlink entry is a regular file holding the link's
+    /// target, cloned like any other file, so the size check applies to it as well.
+    #[test]
+    fn a_symlink_placeholder_is_size_checked_like_a_file() {
+        let repo = std::env::temp_dir().join(format!(
+            "git-sprout-link-placeholder-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&repo);
+        let git = Git::new(Vec::new());
+        git.capture(
+            None,
+            [OsStr::new("init"), OsStr::new("-q"), repo.as_os_str()],
+        )
+        .expect("git init");
+        for args in [
+            &["config", "core.symlinks", "false"][..],
+            &["config", "core.autocrlf", "true"],
+        ] {
+            git.capture(Some(&repo), args).expect("git config");
+        }
+        std::fs::write(repo.join(".gitattributes"), "*.txt -crlf\n").expect("write");
+        let oid = git
+            .capture_with_input(Some(&repo), ["hash-object", "-w", "--stdin"], b"a/target")
+            .expect("git hash-object");
+        let oid = String::from_utf8(oid).expect("hex").trim().to_string();
+        git.capture(
+            Some(&repo),
+            [
+                "update-index",
+                "--add",
+                "--cacheinfo",
+                &format!("120000,{oid},link.txt"),
+            ],
+        )
+        .expect("git update-index");
+        // The placeholder holds the target with CRLF, as an earlier `text` rule left it.
+        std::fs::write(repo.join("link.txt"), "a/target\r\n").expect("write");
+        let mut paths = vec![Planned {
+            path: b"link.txt".to_vec(),
+            mode: SYMLINK_MODE,
+            oid: gix_hash::ObjectId::from_hex(oid.as_bytes()).expect("object id"),
+            mtime: gix_index::entry::stat::Time::default(),
+        }];
+
+        drop_converted_paths(&git, &repo, &repo, &mut paths);
+
+        assert!(paths.is_empty());
         let _ = std::fs::remove_dir_all(&repo);
     }
 
