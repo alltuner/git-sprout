@@ -1,13 +1,14 @@
 // ABOUTME: Runs an accelerated `git worktree add`: git creates and finishes the worktree,
 // ABOUTME: and in between the tool clones whatever the source checkout can supply.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use filetime::FileTime;
+use gix_hash::ObjectId;
 use gix_index::entry::Stat;
 use gix_index::fs::Metadata;
 
@@ -312,6 +313,7 @@ fn populate(git: &Git, destination: &Path, before: &[source::Worktree], stats: &
     );
     verified.paths.sort_by(|a, b| a.path.cmp(&b.path));
     drop_converted_paths(git, &source, &mut verified.paths);
+    drop_resized_paths(git, &source, &mut verified.paths);
 
     let plan = plan::assemble(
         &target,
@@ -413,6 +415,59 @@ fn drop_converted_paths(git: &Git, source: &Path, paths: &mut Vec<Planned>) {
         Some(values) => !attributes::converts(values, endings),
         None => false,
     });
+}
+
+/// Removes the paths whose source file is not the size of the blob a checkout would write.
+///
+/// Once the converted paths are gone, a checkout writes every remaining blob's bytes as
+/// they are, so the source file must be exactly that long. A clean stat cache does not
+/// guarantee it: the source may still hold bytes an earlier attributes rule wrote, such
+/// as CRLF endings from an `eol=crlf` that has since been removed. Git leaves an
+/// unchanged blob's file alone when it switches commits, so those bytes survive the
+/// switch, and the index entry refreshed under the old rule still matches them.
+///
+/// Comparing sizes catches every conversion that changes length; one that kept the length
+/// would get through, and finding it would mean hashing every file. A symlink's size on
+/// disk is the length of its target, which is its blob, and the same holds for the
+/// placeholder file a checkout writes when `core.symlinks` is off.
+fn drop_resized_paths(git: &Git, source: &Path, paths: &mut Vec<Planned>) {
+    if paths.is_empty() {
+        return;
+    }
+    let oids: HashSet<ObjectId> = paths.iter().map(|planned| planned.oid).collect();
+    let mut request = Vec::new();
+    for oid in &oids {
+        request.extend_from_slice(oid.to_string().as_bytes());
+        request.push(b'\n');
+    }
+    let Ok(output) = git.capture_with_input(
+        Some(source),
+        [
+            "cat-file",
+            "--batch-check=%(objectname) %(objectsize)",
+            "--buffer",
+        ],
+        &request,
+    ) else {
+        paths.clear();
+        return;
+    };
+    let sizes = parse_object_sizes(&output);
+    paths.retain(|planned| sizes.get(&planned.oid) == Some(&planned.size));
+}
+
+/// Reads `git cat-file --batch-check='%(objectname) %(objectsize)'` output. A line that
+/// is not an object id and a size, such as git's `<oid> missing`, names no size, so the
+/// paths that need it are dropped.
+fn parse_object_sizes(output: &[u8]) -> HashMap<ObjectId, u64> {
+    output
+        .split(|byte| *byte == b'\n')
+        .filter_map(|line| {
+            let text = std::str::from_utf8(line).ok()?;
+            let (oid, size) = text.split_once(' ')?;
+            Some((ObjectId::from_hex(oid.as_bytes()).ok()?, size.parse().ok()?))
+        })
+        .collect()
 }
 
 /// Asks git which of these paths really differ from what the index records.
@@ -663,5 +718,22 @@ mod tests {
             .map(OsString::from)
             .collect::<Vec<_>>();
         assert_eq!(working_directory(&globals), PathBuf::from(root).join("sub"));
+    }
+
+    #[test]
+    fn reads_object_sizes_at_either_hash_length() {
+        let sha1 = "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391";
+        let sha256 = "473a0f4c3be8a93681a267e3b1e9a7dcda1185436fe141f7749120a303721813";
+        let output = format!("{sha1} 0\n{sha256} 1234\n");
+        let sizes = parse_object_sizes(output.as_bytes());
+        assert_eq!(sizes[&ObjectId::from_hex(sha1.as_bytes()).unwrap()], 0);
+        assert_eq!(sizes[&ObjectId::from_hex(sha256.as_bytes()).unwrap()], 1234);
+    }
+
+    #[test]
+    fn a_missing_object_has_no_size() {
+        let oid = "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391";
+        let sizes = parse_object_sizes(format!("{oid} missing\n").as_bytes());
+        assert!(sizes.is_empty());
     }
 }
