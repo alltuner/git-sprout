@@ -18,6 +18,8 @@ pub struct Planned {
     pub oid: ObjectId,
     /// The source file's modification time, as the source index records it.
     pub mtime: gix_index::entry::stat::Time,
+    /// The source file's size on disk, which for a symlink is the length of its target.
+    pub size: u64,
 }
 
 /// What the verification pass concluded about the target tree.
@@ -145,6 +147,7 @@ pub fn verify_paths(
             mode: blob.mode,
             oid: blob.oid,
             mtime: entry.stat.mtime,
+            size: metadata.len(),
         };
         match verify::stat_verdict(entry, &metadata, timestamp) {
             Verdict::Clone => verified.paths.push(planned),
