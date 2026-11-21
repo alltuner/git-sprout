@@ -139,11 +139,17 @@ fn a_file_left_over_from_an_earlier_attributes_rule_is_left_to_git() {
         fs::read(control.join("src/sibling.bin")).unwrap(),
     );
 
-    // Without this the test passes on a filesystem that cannot clone at all, or after a
-    // change that simply stops cloning: the sibling is a clean, unconverted file.
+    // Without this the test passes after a change that simply stops cloning: the sibling
+    // is a clean, unconverted file. A temporary directory on a filesystem without block
+    // cloning (ext4 on CI) picks a backend whose first clone then fails, so only a
+    // fallback for that reason excuses an empty clone.
     let stats: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(&stats_file).unwrap()).unwrap();
-    if stats["clone_backend"] != "none" {
+    let filesystem_cannot_clone = stats["clone_backend"] == "none"
+        || stats["fallback_reason"]
+            .as_str()
+            .is_some_and(|reason| reason.starts_with("cloning a file failed"));
+    if !filesystem_cannot_clone {
         assert!(
             stats["cloned"].as_u64().unwrap() > 0,
             "the unchanged sibling should still have been cloned: {stats}"
