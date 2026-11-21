@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.4](https://github.com/alltuner/git-sprout/compare/git-sprout-v0.1.3...git-sprout-v0.1.4) (2026-11-21)
+
+
+### Bug Fixes
+
+* leave a working copy that no longer matches its blob size to git ([#32](https://github.com/alltuner/git-sprout/issues/32)) ([d68ed33](https://github.com/alltuner/git-sprout/commit/d68ed339f83afed64f5401244e958b029fed0161))
+
 ## [0.1.3](https://github.com/alltuner/git-sprout/compare/git-sprout-v0.1.2...git-sprout-v0.1.3) (2026-11-17)
 
 
