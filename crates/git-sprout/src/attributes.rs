@@ -110,6 +110,63 @@ fn text_attribute(values: &HashMap<String, Value>) -> &Value {
     }
 }
 
+/// Makes `git ls-files -z` write `<path> NUL <eolattr> NUL` for every index entry.
+pub const EOLATTR_FORMAT: &str = "--format=%(path)%x00%(eolattr)";
+
+/// What git itself makes of a path's `text`, `crlf` and `eol` attributes taken together,
+/// as `git ls-files` reports it in `<eolattr>`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Resolved {
+    /// `-text`: the bytes are never converted, whatever the configuration says.
+    Binary,
+    /// No attribute decides, so the configuration does.
+    Unspecified,
+    /// `text`, `text=auto` or an `eol`: line endings are converted.
+    Text,
+}
+
+impl Resolved {
+    fn parse(eolattr: &[u8]) -> Resolved {
+        match eolattr {
+            b"-text" => Resolved::Binary,
+            b"" => Resolved::Unspecified,
+            _ => Resolved::Text,
+        }
+    }
+}
+
+/// Reads the `<path> NUL <eolattr> NUL` pairs `git ls-files -z` writes for [`EOLATTR_FORMAT`].
+pub fn parse_eolattr(output: &[u8]) -> impl Iterator<Item = (&[u8], Resolved)> {
+    let mut fields = output.split(|byte| *byte == 0);
+    std::iter::from_fn(move || {
+        let path = fields.next().filter(|path| !path.is_empty())?;
+        Some((path, Resolved::parse(fields.next()?)))
+    })
+}
+
+/// Whether `git check-attr` printed `unset` for the path's `text` or `crlf`.
+///
+/// It prints that word for `-text`, and prints it just the same for the string value
+/// `text=unset`. Git reads only the first as binary: a value of `text` or `crlf` it does
+/// not know leaves the attribute unspecified, so the other attributes and
+/// `core.autocrlf` decide. The word alone cannot say which of the two a path has.
+pub fn unset_is_ambiguous(values: &HashMap<String, Value>) -> bool {
+    ["text", "crlf"]
+        .iter()
+        .any(|name| values.get(*name) == Some(&Value::Unset))
+}
+
+/// Replaces what `git check-attr` said about `text` and `crlf` with git's own decision.
+pub fn settle_unset(values: &mut HashMap<String, Value>, resolved: Resolved) {
+    let text = match resolved {
+        Resolved::Binary => Value::Unset,
+        Resolved::Unspecified => Value::Unspecified,
+        Resolved::Text => Value::Set,
+    };
+    values.insert("text".to_string(), text);
+    values.insert("crlf".to_string(), Value::Unspecified);
+}
+
 /// Reads the `<path> NUL <attribute> NUL <value> NUL` triples `git check-attr -z` writes.
 pub fn parse_check_attr(output: &[u8]) -> HashMap<Vec<u8>, HashMap<String, Value>> {
     let mut fields = output.split(|byte| *byte == 0);
@@ -198,6 +255,74 @@ mod tests {
             &values(&[("text", Value::Unset), ("crlf", Value::Set)]),
             PLAIN
         ));
+    }
+
+    const AUTOCRLF: LineEndings = LineEndings {
+        autocrlf: true,
+        crlf: false,
+    };
+
+    #[test]
+    fn reads_the_eolattr_pairs() {
+        let output = b"a.txt\0text eol=crlf\0b.bin\0-text\0c\0\0d e\0text=auto\0".as_slice();
+        let parsed: Vec<_> = parse_eolattr(output).collect();
+        assert_eq!(
+            parsed,
+            [
+                (b"a.txt".as_slice(), Resolved::Text),
+                (b"b.bin".as_slice(), Resolved::Binary),
+                (b"c".as_slice(), Resolved::Unspecified),
+                (b"d e".as_slice(), Resolved::Text),
+            ]
+        );
+        assert_eq!(parse_eolattr(b"").count(), 0);
+    }
+
+    #[test]
+    fn only_an_unset_text_or_crlf_is_ambiguous() {
+        assert!(unset_is_ambiguous(&values(&[("text", Value::Unset)])));
+        assert!(unset_is_ambiguous(&values(&[("crlf", Value::Unset)])));
+        assert!(!unset_is_ambiguous(&values(&[
+            ("text", Value::Set),
+            ("crlf", Value::Named("input".into())),
+            ("eol", Value::Unset),
+            ("filter", Value::Unset),
+        ])));
+    }
+
+    /// `text=unset` and `crlf=unset` reach here as `Value::Unset`, like `-text`. Git's own
+    /// decision for the path says which it was.
+    #[test]
+    fn an_unset_text_is_settled_by_what_git_resolved() {
+        for name in ["text", "crlf"] {
+            let reported = values(&[(name, Value::Unset)]);
+            // Left as check-attr printed it, the path reads as binary.
+            assert!(!converts(&reported, AUTOCRLF));
+
+            let mut binary = reported.clone();
+            settle_unset(&mut binary, Resolved::Binary);
+            assert!(!converts(&binary, AUTOCRLF));
+
+            let mut unspecified = reported.clone();
+            settle_unset(&mut unspecified, Resolved::Unspecified);
+            assert!(converts(&unspecified, AUTOCRLF));
+            assert!(!converts(&unspecified, PLAIN));
+
+            let mut text = reported.clone();
+            settle_unset(&mut text, Resolved::Text);
+            assert!(converts(&text, PLAIN));
+        }
+    }
+
+    /// `text=unset` beside a genuine `-crlf`: git skips the string and reads `-crlf`.
+    #[test]
+    fn a_settled_path_no_longer_reads_its_crlf() {
+        let mut both = values(&[("text", Value::Unset), ("crlf", Value::Set)]);
+        settle_unset(&mut both, Resolved::Binary);
+        assert!(!converts(&both, AUTOCRLF));
+        let mut both = values(&[("text", Value::Unset), ("crlf", Value::Unset)]);
+        settle_unset(&mut both, Resolved::Unspecified);
+        assert!(converts(&both, AUTOCRLF));
     }
 
     #[test]

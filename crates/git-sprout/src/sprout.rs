@@ -410,11 +410,44 @@ fn drop_converted_paths(git: &Git, source: &Path, paths: &mut Vec<Planned>) {
         paths.clear();
         return;
     };
-    let reported = attributes::parse_check_attr(&output);
+    let mut reported = attributes::parse_check_attr(&output);
+    settle_unset_text(git, source, &mut reported);
     paths.retain(|planned| match reported.get(&planned.path) {
         Some(values) => !attributes::converts(values, endings),
         None => false,
     });
+}
+
+/// Asks git what it makes of the paths whose `text` or `crlf` check-attr printed as `unset`.
+///
+/// That word stands for `-text`, which makes a path binary, and equally for the string
+/// `text=unset`, which git does not know and reads as no setting at all. `git ls-files`
+/// reports git's own decision in `%(eolattr)`, so it is asked once, and only when some
+/// path has the word.
+///
+/// `--format` arrived in git 2.38. Where the call fails, on an older git or for any other
+/// reason, check-attr's answer stands and `unset` is read as `-text`, as it was before
+/// this existed: a literal `text=unset` is then still misread, and paths that really are
+/// binary are still cloned.
+fn settle_unset_text(
+    git: &Git,
+    source: &Path,
+    reported: &mut HashMap<Vec<u8>, HashMap<String, attributes::Value>>,
+) {
+    if !reported.values().any(attributes::unset_is_ambiguous) {
+        return;
+    }
+    let Ok(listed) = git.capture(Some(source), ["ls-files", "-z", attributes::EOLATTR_FORMAT])
+    else {
+        return;
+    };
+    for (path, resolved) in attributes::parse_eolattr(&listed) {
+        if let Some(values) = reported.get_mut(path) {
+            if attributes::unset_is_ambiguous(values) {
+                attributes::settle_unset(values, resolved);
+            }
+        }
+    }
 }
 
 /// The line-ending options as git reads them. `core.autocrlf` is a boolean or `input`,
