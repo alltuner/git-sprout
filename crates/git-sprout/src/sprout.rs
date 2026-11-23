@@ -32,9 +32,15 @@ const SYMLINK_MODE: u32 = 0o120000;
 /// The most paths worth naming on one `git diff-files` command line.
 const RACY_PATH_LIMIT: usize = 1000;
 
-/// The configuration that decides how blob bytes become working-tree bytes. Cloning is
+/// The configuration that decides how blob bytes become working-tree bytes, with
+/// `core.ignoreCase` among it because it decides how attribute patterns match. Cloning is
 /// only sound when both worktrees resolve all of it the same way.
-const CONVERSION_KEYS: &[&str] = &["core.autocrlf", "core.eol", "core.symlinks"];
+const CONVERSION_KEYS: &[&str] = &[
+    "core.autocrlf",
+    "core.eol",
+    "core.symlinks",
+    "core.ignoreCase",
+];
 
 /// Creates the worktree, cloning what it can and letting git finish the job.
 pub fn add(command: &AddCommand, stats: &mut Stats) -> ExitCode {
@@ -829,6 +835,78 @@ mod tests {
         assert!(line_endings(&git, &repo).expect("git answers").autocrlf);
 
         let _ = std::fs::remove_dir_all(&repo);
+    }
+
+    /// A repository with one commit, its main worktree detached, and a second worktree on
+    /// branch `topic` (not checked out) whose configuration includes the file returned
+    /// last, through `includeIf.onbranch`, which the main worktree never reads.
+    fn topic_worktree(name: &str) -> (PathBuf, PathBuf, PathBuf, PathBuf) {
+        let scratch =
+            std::env::temp_dir().join(format!("git-sprout-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&scratch);
+        let (repo, destination) = (scratch.join("repo"), scratch.join("destination"));
+        let git = Git::new(Vec::new());
+        git.capture(
+            None,
+            [OsStr::new("init"), OsStr::new("-q"), repo.as_os_str()],
+        )
+        .expect("git init");
+        std::fs::write(repo.join("a.txt"), "one\n").expect("write file");
+        for args in [
+            &["add", "--", "."][..],
+            &[
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@example.invalid",
+                "commit",
+                "-q",
+                "--no-gpg-sign",
+                "-m",
+                "base",
+            ],
+            &["checkout", "-q", "--detach"],
+            &["config", "includeIf.onbranch:topic.path", "topic-config"],
+        ] {
+            git.capture(Some(&repo), args).expect("git");
+        }
+        git.capture(
+            Some(&repo),
+            [
+                OsStr::new("worktree"),
+                OsStr::new("add"),
+                OsStr::new("-q"),
+                OsStr::new("--no-checkout"),
+                OsStr::new("-b"),
+                OsStr::new("topic"),
+                destination.as_os_str(),
+            ],
+        )
+        .expect("git worktree add");
+        let include = repo.join(".git").join("topic-config");
+        (scratch, repo, destination, include)
+    }
+
+    /// An include can give the destination settings the source never reads, such as one
+    /// `includeIf.onbranch` adds for the destination's branch alone. Git reads them when it
+    /// checks the destination out, so the source's view of the paths is then no guide to
+    /// what the checkout writes.
+    #[test]
+    fn settings_only_the_destination_reads_are_a_mismatch() {
+        let (scratch, repo, destination, include) = topic_worktree("destination-settings");
+        let git = Git::new(Vec::new());
+
+        assert_eq!(conversion_mismatch(&git, &repo, &destination), None);
+        // `core.ignoreCase` decides whether a rule such as `*.TXT -text` covers `a.txt`.
+        std::fs::write(&include, "[core]\n\tignoreCase = false\n").expect("write include");
+        let _ = git.capture(Some(&repo), ["config", "core.ignoreCase", "true"]);
+        assert_eq!(
+            conversion_mismatch(&git, &repo, &destination),
+            Some("core.ignoreCase differs between the worktrees".to_string()),
+        );
+        std::fs::write(&include, "").expect("clear include");
+
+        let _ = std::fs::remove_dir_all(&scratch);
     }
 
     #[test]
