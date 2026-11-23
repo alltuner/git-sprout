@@ -41,16 +41,37 @@ impl Value {
     }
 }
 
-/// Whether an attributes file's working copy holds the rules of the blob the index
-/// records for it.
+/// The byte order mark git skips at the start of an attributes file it reads from disk.
+const UTF8_BOM: &[u8] = b"\xEF\xBB\xBF";
+
+/// The length from which git ignores a line of an attributes file, its
+/// `ATTR_MAX_LINE_LENGTH`.
+const MAX_LINE_LENGTH: usize = 2048;
+
+/// Whether git reads from an attributes file's working copy the rules a checkout reads
+/// from the blob the index records for it.
 ///
 /// The copy has to be the blob byte for byte, or the blob with every LF written as CRLF,
 /// which is how a checkout writes an LF blob where it converts line endings and which git
 /// reads as the same lines. Nothing is fetched to compare: the copy is hashed the way git
-/// hashes a blob, as it is and then with its CRLF turned back into LF, and holds the
-/// blob's rules when either names the blob.
+/// hashes a blob, as it is and then with its CRLF turned back into LF, and is the blob
+/// when either names it.
+///
+/// Being the blob is still not enough, because git reads a working copy line by line and
+/// a blob out of the index as one buffer, and the two readers part company in three
+/// places. Only the first skips a UTF-8 byte order mark. A NUL ends the line for the first
+/// and the whole file for the second. And the first drops a line's CR before measuring
+/// the line against the length limit, which the second does not, so a line that reaches
+/// the limit only with its CR is ignored by the second alone. A blob any of that applies
+/// to is read one way in the source and another way by a checkout.
 pub fn same_rules(copy: &[u8], blob: &ObjectId) -> bool {
-    blob_behind(copy, blob).is_some()
+    blob_behind(copy, blob).is_some_and(|blob| {
+        !blob.starts_with(UTF8_BOM)
+            && !blob.contains(&0)
+            && !blob
+                .split(|byte| *byte == b'\n')
+                .any(|line| line.len() == MAX_LINE_LENGTH && line.ends_with(b"\r"))
+    })
 }
 
 /// The bytes of `blob`, if `copy` is that blob as a checkout may have written it.
@@ -311,6 +332,30 @@ mod tests {
             assert!(same_rules(b"*.txt text\r\n", &crlf));
             assert!(!same_rules(b"*.txt text\n", &crlf));
         }
+    }
+
+    /// Git reads the working copy with one reader and the blob with another, and these
+    /// are the bytes the two make different rules of.
+    #[test]
+    fn bytes_git_reads_two_ways_are_not_the_same_rules() {
+        let alike = |bytes: &[u8]| same_rules(bytes, &blob(bytes, gix_hash::Kind::Sha1));
+
+        assert!(!alike(b"\xEF\xBB\xBF*.txt -text\n"));
+        assert!(alike(b"# \xEF\xBB\xBF\n*.txt -text\n"));
+        assert!(!alike(b"# a\0b\n*.txt -text\n"));
+
+        let line = |length: usize| {
+            let mut line = b"*.txt -text".to_vec();
+            line.resize(length, b' ');
+            line.extend_from_slice(b"\r\n");
+            line
+        };
+        // With its CR this line is 2048 bytes, which the reader that keeps the CR ignores
+        // and the one that drops it does not. A byte shorter both read it, and a byte
+        // longer neither does.
+        assert!(alike(&line(2046)));
+        assert!(!alike(&line(2047)));
+        assert!(alike(&line(2048)));
     }
 
     #[test]
