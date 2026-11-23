@@ -18,6 +18,7 @@ pub const ALL: &[&str] = &[
     "attrs-ident",
     "attrs-utf16",
     "attrs-filter",
+    "attrs-untracked",
     "attrs-lfs",
     "attrs-diverging",
     "autocrlf",

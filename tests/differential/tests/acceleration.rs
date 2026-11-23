@@ -6,7 +6,10 @@ use differential::flags;
 use differential::run::Tool;
 
 /// Fixtures whose whole point is that cloning fires.
-const ACCELERATED: &[&str] = &["text-heavy"];
+///
+/// `attrs-untracked` leaves to git the directory an ignored `.gitattributes` marks in the
+/// source alone, and still clones the one a tracked `-text` marks on both sides.
+const ACCELERATED: &[&str] = &["text-heavy", "attrs-untracked"];
 
 /// Fixtures where cloning is expected to fire on nothing at all.
 ///
