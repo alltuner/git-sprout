@@ -1,7 +1,10 @@
 // ABOUTME: Works out which paths a checkout would rewrite on the way to the working tree.
 // ABOUTME: A path whose bytes get converted cannot be judged by the index stat cache alone.
 
+use std::borrow::Cow;
 use std::collections::HashMap;
+
+use gix_hash::ObjectId;
 
 /// The attributes that decide whether checking a blob out rewrites its bytes. `crlf` is
 /// the deprecated spelling of `text`, which git still reads where `text` is unspecified.
@@ -36,6 +39,41 @@ impl Value {
     fn applies(&self) -> bool {
         matches!(self, Value::Set | Value::Named(_))
     }
+}
+
+/// Whether an attributes file's working copy holds the rules of the blob the index
+/// records for it.
+///
+/// The copy has to be the blob byte for byte, or the blob with every LF written as CRLF,
+/// which is how a checkout writes an LF blob where it converts line endings and which git
+/// reads as the same lines. Nothing is fetched to compare: the copy is hashed the way git
+/// hashes a blob, as it is and then with its CRLF turned back into LF, and holds the
+/// blob's rules when either names the blob.
+pub fn same_rules(copy: &[u8], blob: &ObjectId) -> bool {
+    blob_behind(copy, blob).is_some()
+}
+
+/// The bytes of `blob`, if `copy` is that blob as a checkout may have written it.
+fn blob_behind<'a>(copy: &'a [u8], blob: &ObjectId) -> Option<Cow<'a, [u8]>> {
+    if blob_id(copy, blob.kind()).as_ref() == Some(blob) {
+        return Some(Cow::Borrowed(copy));
+    }
+    let mut unconverted = Vec::with_capacity(copy.len());
+    for (position, byte) in copy.iter().enumerate() {
+        if *byte != b'\r' || copy.get(position + 1) != Some(&b'\n') {
+            unconverted.push(*byte);
+        }
+    }
+    (unconverted.len() != copy.len() && blob_id(&unconverted, blob.kind()).as_ref() == Some(blob))
+        .then_some(Cow::Owned(unconverted))
+}
+
+/// The id git gives a blob holding these bytes.
+fn blob_id(bytes: &[u8], kind: gix_hash::Kind) -> Option<ObjectId> {
+    let mut hasher = gix_hash::hasher(kind);
+    hasher.update(format!("blob {}\0", bytes.len()).as_bytes());
+    hasher.update(bytes);
+    hasher.try_finalize().ok()
 }
 
 /// The line-ending configuration in force for a worktree.
@@ -235,6 +273,44 @@ mod tests {
             &values(&[("working-tree-encoding", Value::Named("UTF-16".into()))]),
             PLAIN
         ));
+    }
+
+    fn blob(bytes: &[u8], kind: gix_hash::Kind) -> ObjectId {
+        blob_id(bytes, kind).expect("hash")
+    }
+
+    #[test]
+    fn hashes_a_blob_the_way_git_does() {
+        // `git hash-object --stdin </dev/null`, in a SHA-1 and in a SHA-256 repository.
+        assert_eq!(
+            blob(b"", gix_hash::Kind::Sha1).to_string(),
+            "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391"
+        );
+        assert_eq!(
+            blob(b"", gix_hash::Kind::Sha256).to_string(),
+            "473a0f4c3be8a93681a267e3b1e9a7dcda1185436fe141f7749120a303721813"
+        );
+        // `printf '*.txt -text\n' | git hash-object --stdin`
+        assert_eq!(
+            blob(b"*.txt -text\n", gix_hash::Kind::Sha1).to_string(),
+            "ae35d5c2a88fc564d5318d6b90beae827451ff99"
+        );
+    }
+
+    #[test]
+    fn line_endings_a_checkout_writes_change_no_rule() {
+        for kind in [gix_hash::Kind::Sha1, gix_hash::Kind::Sha256] {
+            let recorded = blob(b"*.txt text\n*.bin -text\n", kind);
+            assert!(same_rules(b"*.txt text\n*.bin -text\n", &recorded));
+            assert!(same_rules(b"*.txt text\r\n*.bin -text\r\n", &recorded));
+            assert!(!same_rules(b"*.txt -text\n*.bin -text\n", &recorded));
+            assert!(!same_rules(b"*.txt text\n*.bin -text\n\n", &recorded));
+            assert!(!same_rules(b"", &recorded));
+            // A checkout never takes CRLF out of a blob, so this copy is somebody's edit.
+            let crlf = blob(b"*.txt text\r\n", kind);
+            assert!(same_rules(b"*.txt text\r\n", &crlf));
+            assert!(!same_rules(b"*.txt text\n", &crlf));
+        }
     }
 
     #[test]

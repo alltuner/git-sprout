@@ -9,7 +9,15 @@ use differential::run::Tool;
 ///
 /// `attrs-untracked` leaves to git the directory an ignored `.gitattributes` marks in the
 /// source alone, and still clones the one a tracked `-text` marks on both sides.
-const ACCELERATED: &[&str] = &["text-heavy", "attrs-untracked"];
+/// `attrs-assumed` and `attrs-filtered` do the same for a tracked one whose working copy
+/// holds other rules than its blob, changed under `--assume-unchanged` in the first and
+/// kept clean by a filter in the second.
+const ACCELERATED: &[&str] = &[
+    "text-heavy",
+    "attrs-untracked",
+    "attrs-assumed",
+    "attrs-filtered",
+];
 
 /// Fixtures where cloning is expected to fire on nothing at all.
 ///

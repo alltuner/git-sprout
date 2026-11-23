@@ -113,8 +113,10 @@ pub fn stat_verdict(
 ///
 /// A path may only be cloned when every `.gitattributes` on its ancestry is the same blob
 /// in both commits, because those files decide the conversion applied on checkout. Any
-/// difference — a different blob, present on one side only, or modified in the source
-/// working tree — disqualifies the whole directory it governs and everything below it.
+/// difference — a different blob, present on one side only, or a file in the source's
+/// working tree that the caller could not match to the blob, listed in
+/// `dirty_attributes` — disqualifies the whole directory it governs and everything below
+/// it.
 /// Prefixes include their trailing slash; the empty prefix is the repository root and
 /// therefore disqualifies everything.
 pub fn poisoned_prefixes(

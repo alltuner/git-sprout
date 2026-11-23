@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 
 use gix_hash::ObjectId;
 
+use crate::attributes;
 use crate::tree::{directory_of, Listing};
 use crate::verify::{self, Verdict};
 
@@ -335,30 +336,52 @@ pub fn as_path(path: &[u8]) -> PathBuf {
     PathBuf::from(String::from_utf8_lossy(path).into_owned())
 }
 
-/// The `.gitattributes` blobs the source index records, split into the ones its stat cache
-/// vouches for and the ones only git can settle by re-reading the file.
+/// The `.gitattributes` blobs the source index records, and the ones among them whose
+/// rules the source does not read as the blob states them.
+///
+/// A checkout of the target reads each directory's rules from the blob, and the plan has
+/// the source's own word for them only where the source reads the same thing. Git reads
+/// the source's from the working copy when there is one, and nothing the index keeps
+/// vouches for that copy's bytes. The stat cache and `git diff-files` compare it with the
+/// blob only after cleaning it, so a copy staged through a clean filter can hold rules its
+/// blob does not and still be clean, and git checks neither for an entry marked
+/// `--assume-unchanged` or `--skip-worktree`. So every copy is compared with its blob
+/// directly, by [`attributes::same_rules`], whatever the entry's flags and stat data say.
+///
+/// A missing copy is alike, since git then reads the rules from the index. One that is not
+/// a regular file or cannot be read is not. An unmerged path has a blob per side and no
+/// one of them to compare with, so it is kept out of the map and always distrusted.
 pub fn source_attribute_files(
     source_index: &gix_index::File,
     source_root: &Path,
 ) -> (BTreeMap<Vec<u8>, ObjectId>, Vec<Vec<u8>>) {
     let mut files = BTreeMap::new();
-    let mut suspect = Vec::new();
-    let timestamp = source_index.timestamp();
+    let mut distrusted: Vec<Vec<u8>> = Vec::new();
     for entry in source_index.entries() {
         let path = entry.path(source_index).to_vec();
         if !crate::tree::is_attributes_file(&path) {
             continue;
         }
-        let verdict =
-            gix_index::fs::Metadata::from_path_no_follow(&source_root.join(as_path(&path)))
-                .map(|metadata| verify::stat_verdict(entry, &metadata, timestamp))
-                .unwrap_or(Verdict::Reject);
-        files.insert(path.clone(), entry.id);
-        if verdict != Verdict::Clone {
-            suspect.push(path);
+        if entry.stage() != gix_index::entry::Stage::Unconflicted {
+            if distrusted.last() != Some(&path) {
+                distrusted.push(path);
+            }
+            continue;
         }
+        let copy = source_root.join(as_path(&path));
+        let alike = match std::fs::symlink_metadata(&copy) {
+            Err(error) => error.kind() == std::io::ErrorKind::NotFound,
+            Ok(metadata) if metadata.is_file() => {
+                std::fs::read(&copy).is_ok_and(|bytes| attributes::same_rules(&bytes, &entry.id))
+            }
+            Ok(_) => false,
+        };
+        if !alike {
+            distrusted.push(path.clone());
+        }
+        files.insert(path, entry.id);
     }
-    (files, suspect)
+    (files, distrusted)
 }
 
 /// The attributes files in the source's working tree that its index does not record, in
@@ -569,6 +592,209 @@ mod tests {
             vec![b".gitattributes".to_vec(), b"src/.gitattributes".to_vec()]
         );
         let _ = std::fs::remove_dir_all(&scratch);
+    }
+
+    /// A scratch repository, and git run in it whatever repository, index and
+    /// configuration the test itself runs under: a hook exports `GIT_DIR` and
+    /// `GIT_INDEX_FILE`, and a machine's own configuration can pick another hash, add
+    /// hooks or convert line endings.
+    struct Scratch {
+        root: PathBuf,
+        repo: PathBuf,
+    }
+
+    impl Scratch {
+        fn new(name: &str) -> Self {
+            let root =
+                std::env::temp_dir().join(format!("git-sprout-{name}-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&root);
+            let scratch = Scratch {
+                repo: root.join("repo"),
+                root,
+            };
+            std::fs::create_dir_all(&scratch.repo).expect("mkdir");
+            std::fs::write(scratch.root.join("gitconfig"), "").expect("write");
+            scratch.git(&["init", "-q", "--object-format=sha1"], b"");
+            scratch.git(&["config", "core.autocrlf", "false"], b"");
+            scratch
+        }
+
+        fn git(&self, args: &[&str], input: &[u8]) -> String {
+            use std::io::Write;
+            let mut child = std::process::Command::new("git")
+                .arg("-C")
+                .arg(&self.repo)
+                .args(args)
+                .env_remove("GIT_DIR")
+                .env_remove("GIT_WORK_TREE")
+                .env_remove("GIT_INDEX_FILE")
+                .env("GIT_CONFIG_GLOBAL", self.root.join("gitconfig"))
+                .env("GIT_CONFIG_NOSYSTEM", "1")
+                .stdin(std::process::Stdio::piped())
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .spawn()
+                .expect("git");
+            child
+                .stdin
+                .take()
+                .expect("stdin")
+                .write_all(input)
+                .expect("write");
+            let output = child.wait_with_output().expect("git");
+            assert!(
+                output.status.success(),
+                "git {args:?}: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            String::from_utf8(output.stdout)
+                .expect("utf-8")
+                .trim()
+                .to_string()
+        }
+
+        fn rules(&self, directory: &str) -> PathBuf {
+            self.repo.join(directory).join(".gitattributes")
+        }
+
+        fn write(&self, directory: &str, content: &str) {
+            std::fs::create_dir_all(self.repo.join(directory)).expect("mkdir");
+            std::fs::write(self.rules(directory), content).expect("write");
+        }
+
+        fn source_attribute_files(&self) -> (BTreeMap<Vec<u8>, ObjectId>, Vec<Vec<u8>>) {
+            let index = gix_index::File::at(
+                self.repo.join(".git").join("index"),
+                gix_hash::Kind::Sha1,
+                true,
+                gix_index::decode::Options::default(),
+            )
+            .expect("read index");
+            source_attribute_files(&index, &self.repo)
+        }
+    }
+
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.root);
+        }
+    }
+
+    /// Git reads an attributes file's rules from its working copy, and nothing the index
+    /// keeps vouches for that copy's bytes: one staged through a clean filter that has
+    /// since been switched off is clean to git, and git does not look at one whose entry
+    /// is marked `--assume-unchanged` or `--skip-worktree`. A copy that differs only in
+    /// the line endings a checkout writes, or in its timestamp, holds the same rules, and
+    /// git reads a missing copy from the index.
+    #[test]
+    fn attributes_files_unlike_their_blobs_are_distrusted() {
+        let scratch = Scratch::new("unlike-attributes");
+        for directory in [
+            "same", "crlf", "touched", "gone", "sparse", "assumed", "skipped", "linked",
+        ] {
+            scratch.write(directory, "*.txt text\n");
+        }
+        scratch.write("filtered", "*.txt text\n.gitattributes filter=rules\n");
+        scratch.git(&["config", "filter.rules.clean", "sed s/-text/text/g"], b"");
+        scratch.git(&["add", "--", "."], b"");
+
+        scratch.write("crlf", "*.txt text\r\n");
+        scratch.write("touched", "*.txt text\n");
+        std::fs::remove_file(scratch.rules("gone")).expect("remove");
+        scratch.git(
+            &[
+                "update-index",
+                "--skip-worktree",
+                "--",
+                "sparse/.gitattributes",
+            ],
+            b"",
+        );
+        std::fs::remove_file(scratch.rules("sparse")).expect("remove");
+        scratch.write("assumed", "*.txt -text\n");
+        scratch.git(
+            &[
+                "update-index",
+                "--assume-unchanged",
+                "--",
+                "assumed/.gitattributes",
+            ],
+            b"",
+        );
+        scratch.write("skipped", "*.txt -text\n");
+        scratch.git(
+            &[
+                "update-index",
+                "--skip-worktree",
+                "--",
+                "skipped/.gitattributes",
+            ],
+            b"",
+        );
+        // Cleaning this copy gives the blob back, so adding it stages nothing; switching
+        // the filter off afterwards leaves a clean entry over bytes the blob does not hold.
+        scratch.write("filtered", "*.txt -text\n.gitattributes filter=rules\n");
+        scratch.git(&["add", "--", "filtered/.gitattributes"], b"");
+        std::fs::create_dir_all(scratch.repo.join(".git/info")).expect("mkdir");
+        std::fs::write(
+            scratch.repo.join(".git/info/attributes"),
+            "filtered/.gitattributes -filter\n",
+        )
+        .expect("write info/attributes");
+        scratch.write("added", "*.txt -text\n");
+        scratch.git(
+            &["add", "--intent-to-add", "--", "added/.gitattributes"],
+            b"",
+        );
+        let mut unlike = vec![
+            b"added/.gitattributes".to_vec(),
+            b"assumed/.gitattributes".to_vec(),
+            b"filtered/.gitattributes".to_vec(),
+            b"skipped/.gitattributes".to_vec(),
+        ];
+        // Git does not follow a link in place of an attributes file, and reads the index.
+        // That is the blob too, but a copy that is no regular file is not worth telling
+        // apart from one git cannot read.
+        #[cfg(unix)]
+        {
+            std::fs::remove_file(scratch.rules("linked")).expect("remove");
+            std::os::unix::fs::symlink("../same/.gitattributes", scratch.rules("linked"))
+                .expect("symlink");
+            unlike.insert(3, b"linked/.gitattributes".to_vec());
+        }
+
+        let (recorded, distrusted) = scratch.source_attribute_files();
+
+        assert_eq!(recorded.len(), 10);
+        assert_eq!(distrusted, unlike);
+    }
+
+    /// An attributes file left unmerged has a blob per side and no one of them that says
+    /// what rules git reads, so it is distrusted whatever its working copy holds.
+    #[test]
+    fn an_unmerged_attributes_file_is_distrusted() {
+        let scratch = Scratch::new("unmerged-attributes");
+        let blob =
+            |content: &str| scratch.git(&["hash-object", "-w", "--stdin"], content.as_bytes());
+        let (base, ours, theirs) = (blob("base\n"), blob("ours\n"), blob("theirs\n"));
+        let entries = format!(
+            "100644 {base} 0\t.gitattributes\n\
+             100644 {base} 1\tsub/.gitattributes\n\
+             100644 {ours} 2\tsub/.gitattributes\n\
+             100644 {theirs} 3\tsub/.gitattributes\n"
+        );
+        scratch.git(&["update-index", "--index-info"], entries.as_bytes());
+        // Resolved by hand to one side and not yet added, and no working copy at the
+        // root, which git then reads from the index.
+        scratch.write("sub", "theirs\n");
+
+        let (recorded, distrusted) = scratch.source_attribute_files();
+
+        assert_eq!(
+            recorded.keys().collect::<Vec<_>>(),
+            vec![&b".gitattributes".to_vec()]
+        );
+        assert_eq!(distrusted, vec![b"sub/.gitattributes".to_vec()]);
     }
 
     #[test]

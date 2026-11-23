@@ -22,6 +22,8 @@ fixture_tests! {
     attrs_utf16 => "attrs-utf16",
     attrs_filter => "attrs-filter",
     attrs_untracked => "attrs-untracked",
+    attrs_assumed => "attrs-assumed",
+    attrs_filtered => "attrs-filtered",
     attrs_lfs => "attrs-lfs",
     attrs_diverging => "attrs-diverging",
     autocrlf => "autocrlf",
