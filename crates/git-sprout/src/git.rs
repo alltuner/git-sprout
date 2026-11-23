@@ -119,9 +119,29 @@ impl Git {
         kind: &str,
         key: &str,
     ) -> io::Result<Option<String>> {
+        self.read_config(directory, Some(kind), key)
+    }
+
+    /// Whether a configuration key is set at all for the given worktree, whatever its
+    /// value. A git that could not answer is an error, not an unset key.
+    pub fn config_is_set(&self, directory: &Path, key: &str) -> io::Result<bool> {
+        Ok(self.read_config(directory, None, key)?.is_some())
+    }
+
+    /// Runs `git config -z --get`, with `--type=<kind>` when there is a kind, and reads the
+    /// one value it prints.
+    fn read_config(
+        &self,
+        directory: &Path,
+        kind: Option<&str>,
+        key: &str,
+    ) -> io::Result<Option<String>> {
+        let kind = kind.map(|kind| format!("--type={kind}"));
         let output = self
             .command(Some(directory))
-            .args(["config", "-z", &format!("--type={kind}"), "--get", key])
+            .args(["config", "-z"])
+            .args(kind)
+            .args(["--get", key])
             .stdin(Stdio::null())
             .stderr(Stdio::null())
             .output()?;

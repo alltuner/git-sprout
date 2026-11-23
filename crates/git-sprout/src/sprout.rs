@@ -392,16 +392,29 @@ fn conversion_mismatch(git: &Git, source: &Path, destination: &Path) -> Option<S
 /// Why the two worktrees might read different attributes from outside their tracked files,
 /// if they might, with the environment git inherits read through `env`.
 ///
-/// Git also reads one global attributes file (`git_attr_global_file` in attr.c). A relative
-/// path there resolves from each worktree's own root, so the same name in both worktrees
-/// is no proof of the same rules, and it leaves the checkout to git. An absolute file is
-/// one file for both, as long as both name the same one.
+/// Git also reads attributes from a tree it is pointed at, `GIT_ATTR_SOURCE` (which
+/// `git --attr-source` sets) or else `attr.tree` (`compute_default_attr_source` in
+/// attr.c), and from one global attributes file (`git_attr_global_file`). A tree-ish such
+/// as `HEAD` resolves in each worktree's own history, and a relative path from each
+/// worktree's own root, so the same name in both worktrees is no proof of the same rules,
+/// and either leaves the checkout to git. An absolute file is one file for both, as long as
+/// both name the same one.
 fn attribute_source_mismatch(
     git: &Git,
     source: &Path,
     destination: &Path,
     env: &dyn Fn(&str) -> Option<OsString>,
 ) -> Option<String> {
+    if env("GIT_ATTR_SOURCE").is_some() {
+        return Some("GIT_ATTR_SOURCE names a tree to read attributes from".to_string());
+    }
+    for worktree in [source, destination] {
+        match git.config_is_set(worktree, "attr.tree") {
+            Ok(false) => {}
+            Ok(true) => return Some("attr.tree names a tree to read attributes from".to_string()),
+            Err(_) => return Some("attr.tree cannot be read".to_string()),
+        }
+    }
     let (Ok(source_file), Ok(destination_file)) = (
         global_attributes_file(git, source, env),
         global_attributes_file(git, destination, env),
@@ -1017,7 +1030,41 @@ mod tests {
             conversion_mismatch(&git, &repo, &destination),
             Some("the worktrees read different global attributes files".to_string()),
         );
+        // A tree to read attributes from, which only the destination reads.
+        std::fs::write(&include, "[attr]\n\ttree = HEAD\n").expect("write include");
+        assert_eq!(
+            conversion_mismatch(&git, &repo, &destination),
+            Some("attr.tree names a tree to read attributes from".to_string()),
+        );
         std::fs::write(&include, "").expect("clear include");
+
+        let _ = std::fs::remove_dir_all(&scratch);
+    }
+
+    /// A tree-ish such as `HEAD` resolves in each worktree's own history, so a tree to read
+    /// attributes from is a mismatch even when both worktrees name the same one, whether
+    /// `attr.tree` names it or `GIT_ATTR_SOURCE`, which `git --attr-source` also sets.
+    #[test]
+    fn a_tree_to_read_attributes_from_is_a_mismatch() {
+        let (scratch, repo, destination, _) = topic_worktree("attribute-tree");
+        let git = Git::new(Vec::new());
+        let with_attr_source = |name: &str| (name == "GIT_ATTR_SOURCE").then(|| "HEAD".into());
+        let without = |_: &str| None;
+
+        assert_eq!(
+            attribute_source_mismatch(&git, &repo, &destination, &without),
+            None
+        );
+        assert_eq!(
+            attribute_source_mismatch(&git, &repo, &destination, &with_attr_source),
+            Some("GIT_ATTR_SOURCE names a tree to read attributes from".to_string()),
+        );
+        git.capture(Some(&repo), ["config", "attr.tree", "HEAD"])
+            .expect("git config");
+        assert_eq!(
+            attribute_source_mismatch(&git, &repo, &destination, &without),
+            Some("attr.tree names a tree to read attributes from".to_string()),
+        );
 
         let _ = std::fs::remove_dir_all(&scratch);
     }
