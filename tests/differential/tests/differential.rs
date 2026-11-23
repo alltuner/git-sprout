@@ -23,6 +23,7 @@ fixture_tests! {
     attrs_filter => "attrs-filter",
     attrs_lfs => "attrs-lfs",
     attrs_diverging => "attrs-diverging",
+    attrs_relative_file => "attrs-relative-file",
     autocrlf => "autocrlf",
     autocrlf_yes => "autocrlf-yes",
     autocrlf_on => "autocrlf-on",

@@ -20,6 +20,7 @@ pub const ALL: &[&str] = &[
     "attrs-filter",
     "attrs-lfs",
     "attrs-diverging",
+    "attrs-relative-file",
     "autocrlf",
     "autocrlf-yes",
     "autocrlf-on",
