@@ -23,6 +23,11 @@ const ACCELERATED: &[&str] = &["text-heavy"];
 /// The `autocrlf-*` fixtures spell `core.autocrlf=true` the other ways git accepts it
 /// (`yes`, `on`, `1`, `TRUE`, a key with no value), so they must clone nothing either.
 ///
+/// `attrs-auto-eol-crlf` (`* text=auto eol=crlf`) checks text out with CRLF, and so do
+/// `eol-crlf-upper` (`core.eol=CRLF`, which git reads without regard to case). Under
+/// `eol-unknown`, a `core.eol` value git does not define, the path is left to git rather
+/// than guessed at.
+///
 /// So this asserts the decision holds. If a future change starts cloning converted
 /// paths, that is a correctness regression and this test is what catches it — do not
 /// "fix" it by moving the fixture back into ACCELERATED.
@@ -33,6 +38,9 @@ const NOT_ACCELERATED: &[&str] = &[
     "autocrlf-one",
     "autocrlf-upper",
     "autocrlf-valueless",
+    "attrs-auto-eol-crlf",
+    "eol-crlf-upper",
+    "eol-unknown",
 ];
 
 #[test]
