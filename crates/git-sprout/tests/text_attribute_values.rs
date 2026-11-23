@@ -248,3 +248,20 @@ fn a_git_without_ls_files_format_still_clones_binary_paths() {
         );
     }
 }
+
+/// `* text=false` is a common way to write "leave line endings alone". Git does not know
+/// that value, and with no `core.autocrlf` it converts nothing, so every path is as
+/// cloneable as it would be with no attributes at all.
+#[test]
+fn a_text_value_git_does_not_know_does_not_stop_cloning() {
+    let made = worktrees("false", "* text=false\n", false, false);
+    made.assert_same("text.txt");
+    made.assert_same("data.dat");
+    if !made.filesystem_cannot_clone() {
+        assert_eq!(
+            made.stats["checked_out_by_git"], 0,
+            "nothing is converted, so nothing should be left to git: {}",
+            made.stats
+        );
+    }
+}

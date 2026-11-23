@@ -103,11 +103,19 @@ pub fn converts(values: &HashMap<String, Value>, endings: LineEndings) -> bool {
 /// The path's `text` attribute, or where that is unspecified its deprecated `crlf`
 /// spelling, the way git's own conversion reads them: `crlf` means `text`, `-crlf` means
 /// `-text`, and `crlf=input` means `text eol=lf`.
+///
+/// Git knows two string values for either, `auto` and `input`, and acts on any other as
+/// if the attribute had been left unspecified: `text=false` sets nothing.
 fn text_attribute(values: &HashMap<String, Value>) -> &Value {
-    match values.get("text") {
-        Some(text) if text != &Value::Unspecified => text,
-        _ => values.get("crlf").unwrap_or(&Value::Unspecified),
-    }
+    ["text", "crlf"]
+        .iter()
+        .filter_map(|name| values.get(*name))
+        .find(|value| match value {
+            Value::Unspecified => false,
+            Value::Named(name) => name == "auto" || name == "input",
+            Value::Unset | Value::Set => true,
+        })
+        .unwrap_or(&Value::Unspecified)
 }
 
 /// Makes `git ls-files -z` write `<path> NUL <eolattr> NUL` for every index entry.
@@ -323,6 +331,43 @@ mod tests {
         let mut both = values(&[("text", Value::Unset), ("crlf", Value::Unset)]);
         settle_unset(&mut both, Resolved::Unspecified);
         assert!(converts(&both, AUTOCRLF));
+    }
+
+    #[test]
+    fn a_text_value_git_does_not_know_sets_nothing() {
+        for name in ["text", "crlf"] {
+            for known in ["auto", "input"] {
+                assert!(converts(
+                    &values(&[(name, Value::Named(known.into()))]),
+                    PLAIN
+                ));
+            }
+            for unknown in ["false", "true", "binary", "Auto"] {
+                let reported = values(&[(name, Value::Named(unknown.into()))]);
+                assert!(!converts(&reported, PLAIN), "{name}={unknown}");
+                assert!(converts(&reported, AUTOCRLF), "{name}={unknown}");
+            }
+        }
+        // Git passes over a `text` it does not know and reads `crlf`, and an `eol` still
+        // marks the path as text.
+        assert!(converts(
+            &values(&[("text", Value::Named("false".into())), ("crlf", Value::Set)]),
+            PLAIN
+        ));
+        assert!(!converts(
+            &values(&[
+                ("text", Value::Named("false".into())),
+                ("crlf", Value::Unset)
+            ]),
+            AUTOCRLF
+        ));
+        assert!(converts(
+            &values(&[
+                ("text", Value::Named("false".into())),
+                ("eol", Value::Named("crlf".into()))
+            ]),
+            PLAIN
+        ));
     }
 
     #[test]
