@@ -22,9 +22,9 @@ path = "src/bin/git-worktree-fast.rs"
 
 [dependencies]
 filetime = "0.2.29"
-gix-error = "0.5.2"
-gix-hash = { version = "0.28.0", features = ["sha1", "sha256"] }
-gix-index = "0.58.0"
+gix-error = "0.5.3"
+gix-hash = { version = "0.29.0", features = ["sha1", "sha256"] }
+gix-index = "0.59.0"
 reflink-copy = "0.1.30"
 serde_json = { version = "1", default-features = false, features = ["std"] }
 

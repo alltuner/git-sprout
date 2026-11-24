@@ -8,6 +8,12 @@
       "matchManagers": ["github-actions"],
       "matchUpdateTypes": ["minor", "patch", "digest"],
       "groupName": "github-actions"
+    },
+    {
+      "description": "gix crates pin each other's versions, so a bump of one alone does not compile.",
+      "matchManagers": ["cargo"],
+      "matchPackageNames": ["/^gix-/"],
+      "groupName": "gitoxide"
     }
   ]
 }

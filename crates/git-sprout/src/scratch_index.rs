@@ -73,10 +73,15 @@ pub fn write(
     }
     state.sort_entries();
     let mut file = File::from_state(state, index_path);
-    file.write(write::Options {
-        extensions: write::Extensions::None,
-        skip_hash: false,
-    })
+    // The umask decides the file's mode. `core.sharedRepository` needs no handling here:
+    // git's own `reset --hard` replaces this index with one it writes under that setting.
+    file.write(
+        write::Options {
+            extensions: write::Extensions::None,
+            skip_hash: false,
+        },
+        Default::default(),
+    )
     .map_err(Error::Write)
 }
 
