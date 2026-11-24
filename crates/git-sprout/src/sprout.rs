@@ -387,10 +387,13 @@ fn worktree_attributes(git: &Git, worktree: &Path) -> Option<Vec<u8>> {
 
 /// Removes the paths a checkout would rewrite on its way to the working tree.
 ///
-/// Every remaining path is one where the blob's bytes and the working tree's bytes are the
-/// same thing, which is what makes the index stat cache a sufficient answer. The
-/// attributes are read from the source, which is sound because the plan has already
-/// established that both sides carry the same attribute blobs.
+/// Every remaining path is one where a checkout writes the blob's bytes unchanged. For a
+/// path nothing converts, the working tree's bytes are the blob's too, which is what makes
+/// the index stat cache a sufficient answer. For a text path checked out with LF, the stat
+/// cache only says the file cleans back to the blob: adding it may have normalised CRLF
+/// away. `drop_resized_paths` settles those, so it has to run after this on every path
+/// this keeps. The attributes are read from the source, which is sound because the plan
+/// has already established that both sides carry the same attribute blobs.
 fn drop_converted_paths(git: &Git, source: &Path, paths: &mut Vec<Planned>) {
     if paths.is_empty() {
         return;
@@ -439,6 +442,12 @@ fn line_endings(git: &Git, source: &Path) -> io::Result<LineEndings> {
 /// as CRLF endings from an `eol=crlf` that has since been removed. Git leaves an
 /// unchanged blob's file alone when it switches commits, so those bytes survive the
 /// switch, and the index entry refreshed under the old rule still matches them.
+///
+/// The same check settles a text path checked out with LF, which `drop_converted_paths`
+/// keeps. A stat-clean file there may still hold CRLF that `git add` normalised away,
+/// since the stat cache only says cleaning it gives the blob back. Cleaning such a path
+/// only ever deletes CRs (`crlf_to_git` in git's `convert.c`), so a file that cleans to
+/// the blob and is the blob's size holds the blob's bytes.
 ///
 /// Comparing sizes catches every conversion that changes length; one that kept the length
 /// would get through, and finding it would mean hashing every file. A symlink's size on

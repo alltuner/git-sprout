@@ -15,6 +15,7 @@ pub const ALL: &[&str] = &[
     "plain",
     "attrs-eol-crlf",
     "attrs-crlf",
+    "attrs-eol-lf",
     "attrs-auto-eol-crlf",
     "attrs-ident",
     "attrs-utf16",

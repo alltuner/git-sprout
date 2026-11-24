@@ -18,6 +18,7 @@ fixture_tests! {
     plain => "plain",
     attrs_eol_crlf => "attrs-eol-crlf",
     attrs_crlf => "attrs-crlf",
+    attrs_eol_lf => "attrs-eol-lf",
     attrs_auto_eol_crlf => "attrs-auto-eol-crlf",
     attrs_ident => "attrs-ident",
     attrs_utf16 => "attrs-utf16",
