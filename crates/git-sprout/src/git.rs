@@ -109,4 +109,31 @@ impl Git {
         self.capture_line(Some(directory), ["config", "--get", key])
             .ok()
     }
+
+    /// Reads a configuration value the way git interprets it, canonicalised by
+    /// `git config --type=<kind>`. Unlike [`Git::config`] this tells an unset key
+    /// (`Ok(None)`) apart from a git that could not answer.
+    pub fn config_typed(
+        &self,
+        directory: &Path,
+        kind: &str,
+        key: &str,
+    ) -> io::Result<Option<String>> {
+        let output = self
+            .command(Some(directory))
+            .args(["config", &format!("--type={kind}"), "--get", key])
+            .stdin(Stdio::null())
+            .stderr(Stdio::null())
+            .output()?;
+        match output.status.code() {
+            // `git config --get` exits 1, and prints nothing, for a key that is not set.
+            Some(1) => Ok(None),
+            Some(0) => {
+                let text = String::from_utf8(output.stdout)
+                    .map_err(|_| io::Error::other("git printed non-UTF-8"))?;
+                Ok(Some(text.trim_end_matches(['\n', '\r']).to_string()))
+            }
+            _ => Err(io::Error::other("git config could not read the value")),
+        }
+    }
 }

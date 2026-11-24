@@ -3,9 +3,16 @@
 
 use std::collections::HashMap;
 
-/// The attributes that decide whether checking a blob out rewrites its bytes.
-pub const CONVERTING_ATTRIBUTES: &[&str] =
-    &["text", "eol", "ident", "filter", "working-tree-encoding"];
+/// The attributes that decide whether checking a blob out rewrites its bytes. `crlf` is
+/// the deprecated spelling of `text`, which git still reads where `text` is unspecified.
+pub const CONVERTING_ATTRIBUTES: &[&str] = &[
+    "text",
+    "crlf",
+    "eol",
+    "ident",
+    "filter",
+    "working-tree-encoding",
+];
 
 /// What `git check-attr` reports for one attribute on one path.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -34,18 +41,33 @@ impl Value {
 /// The line-ending configuration in force for a worktree.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LineEndings {
-    /// `core.autocrlf` is `true` or `input`; either way checkout and add disagree about
-    /// line endings, so a clean file need not equal what a checkout would write.
+    /// `core.autocrlf` is anything but unset or false: `true` or `input`, where checkout
+    /// and add disagree about line endings, so a clean file need not equal what a checkout
+    /// would write, or a value git would not accept.
     pub autocrlf: bool,
-    /// `core.eol` asks for CRLF in the working tree.
+    /// `core.eol` is anything but unset, `lf` or `native`: `crlf`, which asks for CRLF in
+    /// the working tree, or a value this does not know.
     pub crlf: bool,
 }
 
 impl LineEndings {
+    /// Reads the two options the way git does. `autocrlf` is `core.autocrlf` as
+    /// `git config --type=bool-or-str` prints it, so every spelling of a boolean git
+    /// accepts (`yes`, `on`, `1`, `TRUE`, a key with no value) arrives as `true` or
+    /// `false`, while `input` and anything else arrive as written. `eol` is `core.eol`,
+    /// which git compares without regard to case. `None` is an unset key.
+    ///
+    /// Only the settings known to leave a checkout alone count as no conversion; any other
+    /// value, including one git would reject, counts as converting, which leaves the path
+    /// to git.
     pub fn from_config(autocrlf: Option<&str>, eol: Option<&str>) -> Self {
         LineEndings {
-            autocrlf: matches!(autocrlf, Some("true") | Some("input")),
-            crlf: matches!(eol, Some("crlf")),
+            autocrlf: !matches!(autocrlf, None | Some("false")),
+            crlf: !eol.is_none_or(|eol| {
+                ["lf", "native"]
+                    .iter()
+                    .any(|known| eol.eq_ignore_ascii_case(known))
+            }),
         }
     }
 }
@@ -65,7 +87,7 @@ pub fn converts(values: &HashMap<String, Value>, endings: LineEndings) -> bool {
             return true;
         }
     }
-    let text = values.get("text").unwrap_or(&Value::Unspecified);
+    let text = text_attribute(values);
     if text == &Value::Unset {
         return false;
     }
@@ -76,6 +98,16 @@ pub fn converts(values: &HashMap<String, Value>, endings: LineEndings) -> bool {
         return true;
     }
     endings.autocrlf || endings.crlf
+}
+
+/// The path's `text` attribute, or where that is unspecified its deprecated `crlf`
+/// spelling, the way git's own conversion reads them: `crlf` means `text`, `-crlf` means
+/// `-text`, and `crlf=input` means `text eol=lf`.
+fn text_attribute(values: &HashMap<String, Value>) -> &Value {
+    match values.get("text") {
+        Some(text) if text != &Value::Unspecified => text,
+        _ => values.get("crlf").unwrap_or(&Value::Unspecified),
+    }
 }
 
 /// Reads the `<path> NUL <attribute> NUL <value> NUL` triples `git check-attr -z` writes.
@@ -129,6 +161,41 @@ mod tests {
     fn text_alone_rewrites_the_bytes() {
         assert!(converts(
             &values(&[("text", Value::Named("auto".into()))]),
+            PLAIN
+        ));
+    }
+
+    #[test]
+    fn only_settings_known_to_leave_checkout_alone_are_plain() {
+        assert_eq!(LineEndings::from_config(None, None), PLAIN);
+        assert_eq!(LineEndings::from_config(Some("false"), Some("lf")), PLAIN);
+        assert_eq!(LineEndings::from_config(None, Some("LF")), PLAIN);
+        assert_eq!(LineEndings::from_config(None, Some("Native")), PLAIN);
+        for autocrlf in ["true", "input", "INPUT", "bogus", ""] {
+            assert!(
+                LineEndings::from_config(Some(autocrlf), None).autocrlf,
+                "core.autocrlf={autocrlf:?}"
+            );
+        }
+        for eol in ["crlf", "CRLF", "bogus", ""] {
+            assert!(
+                LineEndings::from_config(None, Some(eol)).crlf,
+                "core.eol={eol:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_deprecated_crlf_attribute_marks_text() {
+        assert!(converts(&values(&[("crlf", Value::Set)]), PLAIN));
+        assert!(converts(
+            &values(&[("crlf", Value::Named("input".into()))]),
+            PLAIN
+        ));
+        assert!(!converts(&values(&[("crlf", Value::Unset)]), PLAIN));
+        // An explicit `text` wins over the deprecated spelling.
+        assert!(!converts(
+            &values(&[("text", Value::Unset), ("crlf", Value::Set)]),
             PLAIN
         ));
     }
