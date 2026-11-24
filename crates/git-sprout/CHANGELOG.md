@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.6](https://github.com/alltuner/git-sprout/compare/git-sprout-v0.1.5...git-sprout-v0.1.6) (2026-11-24)
+
+
+### Bug Fixes
+
+* read feature.manyFiles and core.splitIndex the way git does ([#41](https://github.com/alltuner/git-sprout/issues/41)) ([45eeab9](https://github.com/alltuner/git-sprout/commit/45eeab912707d708ba237c21d0546fce83123bd6))
+
 ## [0.1.5](https://github.com/alltuner/git-sprout/compare/git-sprout-v0.1.4...git-sprout-v0.1.5) (2026-11-24)
 
 
