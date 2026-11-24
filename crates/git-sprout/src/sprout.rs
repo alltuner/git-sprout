@@ -312,7 +312,7 @@ fn populate(git: &Git, destination: &Path, before: &[source::Worktree], stats: &
             .cloned(),
     );
     verified.paths.sort_by(|a, b| a.path.cmp(&b.path));
-    drop_converted_paths(git, &source, &mut verified.paths);
+    drop_converted_paths(git, &source, destination, &mut verified.paths);
     drop_resized_paths(git, &source, &mut verified.paths);
 
     let plan = plan::assemble(
@@ -394,8 +394,19 @@ fn worktree_attributes(git: &Git, worktree: &Path) -> Option<Vec<u8>> {
 /// away. `drop_resized_paths` settles those, so it has to run after this on every path
 /// this keeps. The attributes are read from the source, which is sound because the plan
 /// has already established that both sides carry the same attribute blobs.
-fn drop_converted_paths(git: &Git, source: &Path, paths: &mut Vec<Planned>) {
+///
+/// A filter driver named `unset` or `unspecified` in either worktree's configuration
+/// stops the plan: `git check-attr` prints `filter=unset` exactly as it prints `-filter`,
+/// so such a path would read as unfiltered while git runs the driver on checkout.
+fn drop_converted_paths(git: &Git, source: &Path, destination: &Path, paths: &mut Vec<Planned>) {
     if paths.is_empty() {
+        return;
+    }
+    if [source, destination]
+        .into_iter()
+        .any(|worktree| configures_reserved_filter(git, worktree))
+    {
+        paths.clear();
         return;
     }
     let Ok(endings) = line_endings(git, source) else {
@@ -418,6 +429,32 @@ fn drop_converted_paths(git: &Git, source: &Path, paths: &mut Vec<Planned>) {
         Some(values) => !attributes::converts(values, endings),
         None => false,
     });
+}
+
+/// Filter driver names `git check-attr` cannot tell apart from a state: it prints
+/// `filter=unset` as `unset` and `filter=unspecified` as `unspecified`, the same as
+/// `-filter` and no `filter` at all.
+const RESERVED_FILTER_DRIVERS: &[&str] = &["unset", "unspecified"];
+
+/// Whether this worktree's configuration defines a filter driver under a reserved name,
+/// or git could not say.
+fn configures_reserved_filter(git: &Git, worktree: &Path) -> bool {
+    let Ok(names) = git.capture(Some(worktree), ["config", "-z", "--name-only", "--list"]) else {
+        return true;
+    };
+    names
+        .split(|byte| *byte == 0)
+        .any(names_reserved_filter_driver)
+}
+
+/// Whether a key as `git config --name-only --list` prints it, with the section name
+/// lowercased and the subsection as written, belongs to a reserved filter driver.
+fn names_reserved_filter_driver(key: &[u8]) -> bool {
+    RESERVED_FILTER_DRIVERS.iter().any(|driver| {
+        key.strip_prefix(b"filter.")
+            .and_then(|rest| rest.strip_prefix(driver.as_bytes()))
+            .is_some_and(|rest| rest.starts_with(b"."))
+    })
 }
 
 /// The line-ending options as git reads them. `core.autocrlf` is a boolean or `input`,
@@ -850,6 +887,28 @@ mod tests {
             .map(OsString::from)
             .collect::<Vec<_>>();
         assert_eq!(working_directory(&globals), PathBuf::from(root).join("sub"));
+    }
+
+    #[test]
+    fn only_filter_drivers_named_like_a_state_are_reserved() {
+        for key in [
+            "filter.unset.clean",
+            "filter.unset.smudge",
+            "filter.unspecified.process",
+            "filter.unset.required",
+        ] {
+            assert!(names_reserved_filter_driver(key.as_bytes()), "{key}");
+        }
+        for key in [
+            "filter.lfs.clean",
+            "filter.unsetx.clean",
+            "filter.UNSET.clean",
+            "filter.unset",
+            "core.unset.clean",
+            "",
+        ] {
+            assert!(!names_reserved_filter_driver(key.as_bytes()), "{key}");
+        }
     }
 
     #[test]
