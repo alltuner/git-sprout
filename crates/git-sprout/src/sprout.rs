@@ -221,7 +221,7 @@ fn populate(git: &Git, destination: &Path, before: &[source::Worktree], stats: &
     let version = scratch_index::default_version(
         std::env::var("GIT_INDEX_VERSION").ok().as_deref(),
         git.config(destination, "index.version").as_deref(),
-        git.config(destination, "feature.manyFiles").as_deref() == Some("true"),
+        has_many_files(git, destination),
     );
     if version != scratch_index::SUPPORTED_VERSION {
         stats.fall_back(format!("the repository writes index version {version}"));
@@ -660,7 +660,20 @@ fn splits_the_index(git: &Git, destination: &Path) -> bool {
     if std::env::var("GIT_TEST_SPLIT_INDEX").as_deref() == Ok("1") {
         return true;
     }
-    git.config(destination, "core.splitIndex").as_deref() == Some("true")
+    is_on(git, destination, "core.splitIndex")
+}
+
+/// Whether `feature.manyFiles` is on, which makes a fresh index version 4.
+fn has_many_files(git: &Git, destination: &Path) -> bool {
+    is_on(git, destination, "feature.manyFiles")
+}
+
+/// Whether a boolean option is on, with git reading it so that every spelling it accepts
+/// (`yes`, `on`, `1`, `TRUE`, a key with no value) counts. A value git cannot read counts
+/// as on: both options that use this make the caller leave the worktree to git.
+fn is_on(git: &Git, directory: &Path, key: &str) -> bool {
+    git.config_typed(directory, "bool", key)
+        .map_or(true, |value| value.as_deref() == Some("true"))
 }
 
 /// The permissions a checkout gives a path with this tree mode.
@@ -721,6 +734,45 @@ mod tests {
         assert_eq!(checkout_mode(0o100755, 0o077), 0o700);
         assert_eq!(checkout_mode(0o100644, 0o000), 0o666);
         assert_eq!(directory_mode(0o022), 0o755);
+    }
+
+    /// `feature.manyFiles` and `core.splitIndex` are booleans to git, so every spelling it
+    /// accepts has to count, or the scratch index takes a version or shape git would not
+    /// write. A value git rejects counts as set, which falls back to git.
+    #[test]
+    fn index_options_read_every_boolean_spelling_git_accepts() {
+        let repo =
+            std::env::temp_dir().join(format!("git-sprout-index-options-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&repo);
+        let git = Git::new(Vec::new());
+        git.capture(
+            None,
+            [OsStr::new("init"), OsStr::new("-q"), repo.as_os_str()],
+        )
+        .expect("git init");
+        let read = |key: &str, value: &str| {
+            let _ = git.capture(Some(&repo), ["config", "--unset-all", key]);
+            git.capture(Some(&repo), ["config", key, value])
+                .expect("git config");
+            match key {
+                "feature.manyFiles" => has_many_files(&git, &repo),
+                _ => splits_the_index(&git, &repo),
+            }
+        };
+
+        for key in ["feature.manyFiles", "core.splitIndex"] {
+            for spelling in ["true", "yes", "on", "1", "TRUE", "bogus"] {
+                assert!(read(key, spelling), "{key}={spelling}");
+            }
+            for spelling in ["false", "no", "off", "0", "FALSE", ""] {
+                assert!(!read(key, spelling), "{key}={spelling}");
+            }
+            let _ = git.capture(Some(&repo), ["config", "--unset-all", key]);
+        }
+        assert!(!has_many_files(&git, &repo), "unset feature.manyFiles");
+        assert!(!splits_the_index(&git, &repo), "unset core.splitIndex");
+
+        let _ = std::fs::remove_dir_all(&repo);
     }
 
     /// Git reads `core.autocrlf` as a boolean and `core.eol` without regard to case, so
