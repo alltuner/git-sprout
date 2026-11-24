@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.5](https://github.com/alltuner/git-sprout/compare/git-sprout-v0.1.4...git-sprout-v0.1.5) (2026-11-24)
+
+
+### Bug Fixes
+
+* **deps:** update gix-index to 0.59, gix-hash to 0.29 and gix-error to 0.5.3 ([#39](https://github.com/alltuner/git-sprout/issues/39)) ([f1d259d](https://github.com/alltuner/git-sprout/commit/f1d259d46401db9a6960933232871df1ef3352d7))
+* read line-ending settings the way git does ([#29](https://github.com/alltuner/git-sprout/issues/29)) ([48a196b](https://github.com/alltuner/git-sprout/commit/48a196bf35900763b0cc397bec21192d651c3515))
+
 ## [0.1.4](https://github.com/alltuner/git-sprout/compare/git-sprout-v0.1.3...git-sprout-v0.1.4) (2026-11-21)
 
 
