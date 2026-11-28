@@ -100,14 +100,90 @@ pub fn converts(values: &HashMap<String, Value>, endings: LineEndings) -> bool {
     endings.autocrlf || endings.crlf
 }
 
-/// The path's `text` attribute, or where that is unspecified its deprecated `crlf`
-/// spelling, the way git's own conversion reads them: `crlf` means `text`, `-crlf` means
+/// The path's `text` attribute, or where that is unspecified or a value git does not
+/// know its deprecated `crlf` spelling, the way git's own conversion reads them: `crlf` means `text`, `-crlf` means
 /// `-text`, and `crlf=input` means `text eol=lf`.
+///
+/// Git knows two string values for either, `auto` and `input`, and acts on any other as
+/// if the attribute had been left unspecified: `text=false` sets nothing.
+///
+/// An `unset` `crlf` that [`settle_unset`] could not replace with git's own reading is
+/// `-crlf` or the string `crlf=unset`. Behind a `text` git does not know, it is read as
+/// the string, so the configuration and `eol` decide: that reading converts whenever the
+/// other one does, and it leaves the path to git as before unknown `text` values were
+/// passed over.
 fn text_attribute(values: &HashMap<String, Value>) -> &Value {
-    match values.get("text") {
-        Some(text) if text != &Value::Unspecified => text,
-        _ => values.get("crlf").unwrap_or(&Value::Unspecified),
+    let decides = |value: &Value| match value {
+        Value::Unspecified => false,
+        Value::Named(name) => name == "auto" || name == "input",
+        Value::Unset | Value::Set => true,
+    };
+    let text = values.get("text").unwrap_or(&Value::Unspecified);
+    if decides(text) {
+        return text;
     }
+    match values.get("crlf") {
+        Some(Value::Unset) if matches!(text, Value::Named(_)) => &Value::Unspecified,
+        Some(crlf) if decides(crlf) => crlf,
+        _ => &Value::Unspecified,
+    }
+}
+
+/// Makes `git ls-files -z` write `<path> NUL <eolattr> NUL` for every index entry.
+pub const EOLATTR_FORMAT: &str = "--format=%(path)%x00%(eolattr)";
+
+/// What git itself makes of a path's `text`, `crlf` and `eol` attributes taken together,
+/// as `git ls-files` reports it in `<eolattr>`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Resolved {
+    /// `-text`: the bytes are never converted, whatever the configuration says.
+    Binary,
+    /// No attribute decides, so the configuration does.
+    Unspecified,
+    /// `text`, `text=auto` or an `eol`: line endings are converted.
+    Text,
+}
+
+impl Resolved {
+    fn parse(eolattr: &[u8]) -> Resolved {
+        match eolattr {
+            b"-text" => Resolved::Binary,
+            b"" => Resolved::Unspecified,
+            _ => Resolved::Text,
+        }
+    }
+}
+
+/// Reads the `<path> NUL <eolattr> NUL` pairs `git ls-files -z` writes for [`EOLATTR_FORMAT`].
+pub fn parse_eolattr(output: &[u8]) -> impl Iterator<Item = (&[u8], Resolved)> {
+    let mut fields = output.split(|byte| *byte == 0);
+    std::iter::from_fn(move || {
+        let path = fields.next().filter(|path| !path.is_empty())?;
+        Some((path, Resolved::parse(fields.next()?)))
+    })
+}
+
+/// Whether `git check-attr` printed `unset` for the path's `text` or `crlf`.
+///
+/// It prints that word for `-text`, and prints it just the same for the string value
+/// `text=unset`. Git reads only the first as binary: a value of `text` or `crlf` it does
+/// not know leaves the attribute unspecified, so the other attributes and
+/// `core.autocrlf` decide. The word alone cannot say which of the two a path has.
+pub fn unset_is_ambiguous(values: &HashMap<String, Value>) -> bool {
+    ["text", "crlf"]
+        .iter()
+        .any(|name| values.get(*name) == Some(&Value::Unset))
+}
+
+/// Replaces what `git check-attr` said about `text` and `crlf` with git's own decision.
+pub fn settle_unset(values: &mut HashMap<String, Value>, resolved: Resolved) {
+    let text = match resolved {
+        Resolved::Binary => Value::Unset,
+        Resolved::Unspecified => Value::Unspecified,
+        Resolved::Text => Value::Set,
+    };
+    values.insert("text".to_string(), text);
+    values.insert("crlf".to_string(), Value::Unspecified);
 }
 
 /// Reads the `<path> NUL <attribute> NUL <value> NUL` triples `git check-attr -z` writes.
@@ -198,6 +274,172 @@ mod tests {
             &values(&[("text", Value::Unset), ("crlf", Value::Set)]),
             PLAIN
         ));
+    }
+
+    const AUTOCRLF: LineEndings = LineEndings {
+        autocrlf: true,
+        crlf: false,
+    };
+
+    #[test]
+    fn reads_the_eolattr_pairs() {
+        let output = b"a.txt\0text eol=crlf\0b.bin\0-text\0c\0\0d e\0text=auto\0".as_slice();
+        let parsed: Vec<_> = parse_eolattr(output).collect();
+        assert_eq!(
+            parsed,
+            [
+                (b"a.txt".as_slice(), Resolved::Text),
+                (b"b.bin".as_slice(), Resolved::Binary),
+                (b"c".as_slice(), Resolved::Unspecified),
+                (b"d e".as_slice(), Resolved::Text),
+            ]
+        );
+        assert_eq!(parse_eolattr(b"").count(), 0);
+    }
+
+    #[test]
+    fn only_an_unset_text_or_crlf_is_ambiguous() {
+        assert!(unset_is_ambiguous(&values(&[("text", Value::Unset)])));
+        assert!(unset_is_ambiguous(&values(&[("crlf", Value::Unset)])));
+        assert!(!unset_is_ambiguous(&values(&[
+            ("text", Value::Set),
+            ("crlf", Value::Named("input".into())),
+            ("eol", Value::Unset),
+            ("filter", Value::Unset),
+        ])));
+    }
+
+    /// `text=unset` and `crlf=unset` reach here as `Value::Unset`, like `-text`. Git's own
+    /// decision for the path says which it was.
+    #[test]
+    fn an_unset_text_is_settled_by_what_git_resolved() {
+        for name in ["text", "crlf"] {
+            let reported = values(&[(name, Value::Unset)]);
+            // Left as check-attr printed it, the path reads as binary.
+            assert!(!converts(&reported, AUTOCRLF));
+
+            let mut binary = reported.clone();
+            settle_unset(&mut binary, Resolved::Binary);
+            assert!(!converts(&binary, AUTOCRLF));
+
+            let mut unspecified = reported.clone();
+            settle_unset(&mut unspecified, Resolved::Unspecified);
+            assert!(converts(&unspecified, AUTOCRLF));
+            assert!(!converts(&unspecified, PLAIN));
+
+            let mut text = reported.clone();
+            settle_unset(&mut text, Resolved::Text);
+            assert!(converts(&text, PLAIN));
+        }
+    }
+
+    /// `text=unset` beside a genuine `-crlf`: git skips the string and reads `-crlf`.
+    #[test]
+    fn a_settled_path_no_longer_reads_its_crlf() {
+        let mut both = values(&[("text", Value::Unset), ("crlf", Value::Set)]);
+        settle_unset(&mut both, Resolved::Binary);
+        assert!(!converts(&both, AUTOCRLF));
+        let mut both = values(&[("text", Value::Unset), ("crlf", Value::Unset)]);
+        settle_unset(&mut both, Resolved::Unspecified);
+        assert!(converts(&both, AUTOCRLF));
+    }
+
+    #[test]
+    fn a_text_value_git_does_not_know_sets_nothing() {
+        for name in ["text", "crlf"] {
+            for known in ["auto", "input"] {
+                assert!(converts(
+                    &values(&[(name, Value::Named(known.into()))]),
+                    PLAIN
+                ));
+            }
+            for unknown in ["false", "true", "binary", "Auto"] {
+                let reported = values(&[(name, Value::Named(unknown.into()))]);
+                assert!(!converts(&reported, PLAIN), "{name}={unknown}");
+                assert!(converts(&reported, AUTOCRLF), "{name}={unknown}");
+            }
+        }
+        // Git passes over a `text` it does not know and reads `crlf`, and an `eol` still
+        // marks the path as text.
+        assert!(converts(
+            &values(&[("text", Value::Named("false".into())), ("crlf", Value::Set)]),
+            PLAIN
+        ));
+        let mut binary = values(&[
+            ("text", Value::Named("false".into())),
+            ("crlf", Value::Unset),
+        ]);
+        settle_unset(&mut binary, Resolved::Binary);
+        assert!(!converts(&binary, AUTOCRLF));
+        assert!(converts(
+            &values(&[
+                ("text", Value::Named("false".into())),
+                ("eol", Value::Named("crlf".into()))
+            ]),
+            PLAIN
+        ));
+    }
+
+    /// Git reads `crlf` whenever `text` leaves the decision open, which a value it does
+    /// not know does just as an unspecified one does: `git ls-files --eol` shows
+    /// `attr/-text` for `text=foo -crlf`, `attr/text` for `text=foo crlf` and
+    /// `attr/text eol=lf` for `text=foo crlf=input`.
+    #[test]
+    fn a_text_value_git_does_not_know_falls_back_to_crlf() {
+        for crlf in [
+            None,
+            Some(Value::Set),
+            Some(Value::Named("input".into())),
+            Some(Value::Named("auto".into())),
+            Some(Value::Named("foo".into())),
+        ] {
+            let mut unspecified = values(&[("text", Value::Unspecified)]);
+            let mut unknown = values(&[("text", Value::Named("foo".into()))]);
+            if let Some(crlf) = &crlf {
+                unspecified.insert("crlf".into(), crlf.clone());
+                unknown.insert("crlf".into(), crlf.clone());
+            }
+            assert_eq!(
+                text_attribute(&unknown),
+                text_attribute(&unspecified),
+                "crlf={crlf:?}"
+            );
+            for endings in [PLAIN, AUTOCRLF] {
+                assert_eq!(
+                    converts(&unknown, endings),
+                    converts(&unspecified, endings),
+                    "crlf={crlf:?} {endings:?}"
+                );
+            }
+        }
+        // `-crlf` makes the path binary before `eol` is read, as `-text` would.
+        let mut binary = values(&[
+            ("text", Value::Named("foo".into())),
+            ("crlf", Value::Unset),
+            ("eol", Value::Named("crlf".into())),
+        ]);
+        settle_unset(&mut binary, Resolved::Binary);
+        assert!(!converts(&binary, PLAIN));
+    }
+
+    /// check-attr prints `unset` for `-crlf` and for the string `crlf=unset` alike. Where
+    /// git's own reading could not settle which, an `unset` `crlf` behind a `text` git does
+    /// not know is read as the string: git then reads `text=foo crlf=unset eol=crlf` as
+    /// `text eol=crlf`, and the other reading would clone what a checkout converts.
+    #[test]
+    fn an_unresolved_crlf_unset_after_an_unknown_text_is_read_as_the_string() {
+        let unresolved = |eol: Option<&str>| {
+            let mut reported =
+                values(&[("text", Value::Named("foo".into())), ("crlf", Value::Unset)]);
+            if let Some(eol) = eol {
+                reported.insert("eol".into(), Value::Named(eol.into()));
+            }
+            reported
+        };
+        assert!(converts(&unresolved(Some("crlf")), PLAIN));
+        assert!(converts(&unresolved(None), AUTOCRLF));
+        // Neither reading converts anything here, so the path is still cloned.
+        assert!(!converts(&unresolved(None), PLAIN));
     }
 
     #[test]
