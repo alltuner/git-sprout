@@ -746,12 +746,6 @@ mod tests {
             &["add", "--intent-to-add", "--", "added/.gitattributes"],
             b"",
         );
-        let mut unlike = vec![
-            b"added/.gitattributes".to_vec(),
-            b"assumed/.gitattributes".to_vec(),
-            b"filtered/.gitattributes".to_vec(),
-            b"skipped/.gitattributes".to_vec(),
-        ];
         // Git does not follow a link in place of an attributes file, and reads the index.
         // That is the blob too, but a copy that is no regular file is not worth telling
         // apart from one git cannot read.
@@ -760,8 +754,18 @@ mod tests {
             std::fs::remove_file(scratch.rules("linked")).expect("remove");
             std::os::unix::fs::symlink("../same/.gitattributes", scratch.rules("linked"))
                 .expect("symlink");
-            unlike.insert(3, b"linked/.gitattributes".to_vec());
         }
+        let unlike: Vec<Vec<u8>> = [
+            &b"added/.gitattributes"[..],
+            b"assumed/.gitattributes",
+            b"filtered/.gitattributes",
+            #[cfg(unix)]
+            b"linked/.gitattributes",
+            b"skipped/.gitattributes",
+        ]
+        .iter()
+        .map(|path| path.to_vec())
+        .collect();
 
         let (recorded, distrusted) = scratch.source_attribute_files();
 
