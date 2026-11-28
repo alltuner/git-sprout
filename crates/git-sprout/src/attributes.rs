@@ -106,16 +106,27 @@ pub fn converts(values: &HashMap<String, Value>, endings: LineEndings) -> bool {
 ///
 /// Git knows two string values for either, `auto` and `input`, and acts on any other as
 /// if the attribute had been left unspecified: `text=false` sets nothing.
+///
+/// An `unset` `crlf` that [`settle_unset`] could not replace with git's own reading is
+/// `-crlf` or the string `crlf=unset`. Behind a `text` git does not know, it is read as
+/// the string, so the configuration and `eol` decide: that reading converts whenever the
+/// other one does, and it leaves the path to git as before unknown `text` values were
+/// passed over.
 fn text_attribute(values: &HashMap<String, Value>) -> &Value {
-    ["text", "crlf"]
-        .iter()
-        .filter_map(|name| values.get(*name))
-        .find(|value| match value {
-            Value::Unspecified => false,
-            Value::Named(name) => name == "auto" || name == "input",
-            Value::Unset | Value::Set => true,
-        })
-        .unwrap_or(&Value::Unspecified)
+    let decides = |value: &Value| match value {
+        Value::Unspecified => false,
+        Value::Named(name) => name == "auto" || name == "input",
+        Value::Unset | Value::Set => true,
+    };
+    let text = values.get("text").unwrap_or(&Value::Unspecified);
+    if decides(text) {
+        return text;
+    }
+    match values.get("crlf") {
+        Some(Value::Unset) if matches!(text, Value::Named(_)) => &Value::Unspecified,
+        Some(crlf) if decides(crlf) => crlf,
+        _ => &Value::Unspecified,
+    }
 }
 
 /// Makes `git ls-files -z` write `<path> NUL <eolattr> NUL` for every index entry.
@@ -354,13 +365,12 @@ mod tests {
             &values(&[("text", Value::Named("false".into())), ("crlf", Value::Set)]),
             PLAIN
         ));
-        assert!(!converts(
-            &values(&[
-                ("text", Value::Named("false".into())),
-                ("crlf", Value::Unset)
-            ]),
-            AUTOCRLF
-        ));
+        let mut binary = values(&[
+            ("text", Value::Named("false".into())),
+            ("crlf", Value::Unset),
+        ]);
+        settle_unset(&mut binary, Resolved::Binary);
+        assert!(!converts(&binary, AUTOCRLF));
         assert!(converts(
             &values(&[
                 ("text", Value::Named("false".into())),
@@ -378,7 +388,6 @@ mod tests {
     fn a_text_value_git_does_not_know_falls_back_to_crlf() {
         for crlf in [
             None,
-            Some(Value::Unset),
             Some(Value::Set),
             Some(Value::Named("input".into())),
             Some(Value::Named("auto".into())),
@@ -404,14 +413,33 @@ mod tests {
             }
         }
         // `-crlf` makes the path binary before `eol` is read, as `-text` would.
-        assert!(!converts(
-            &values(&[
-                ("text", Value::Named("foo".into())),
-                ("crlf", Value::Unset),
-                ("eol", Value::Named("crlf".into())),
-            ]),
-            PLAIN
-        ));
+        let mut binary = values(&[
+            ("text", Value::Named("foo".into())),
+            ("crlf", Value::Unset),
+            ("eol", Value::Named("crlf".into())),
+        ]);
+        settle_unset(&mut binary, Resolved::Binary);
+        assert!(!converts(&binary, PLAIN));
+    }
+
+    /// check-attr prints `unset` for `-crlf` and for the string `crlf=unset` alike. Where
+    /// git's own reading could not settle which, an `unset` `crlf` behind a `text` git does
+    /// not know is read as the string: git then reads `text=foo crlf=unset eol=crlf` as
+    /// `text eol=crlf`, and the other reading would clone what a checkout converts.
+    #[test]
+    fn an_unresolved_crlf_unset_after_an_unknown_text_is_read_as_the_string() {
+        let unresolved = |eol: Option<&str>| {
+            let mut reported =
+                values(&[("text", Value::Named("foo".into())), ("crlf", Value::Unset)]);
+            if let Some(eol) = eol {
+                reported.insert("eol".into(), Value::Named(eol.into()));
+            }
+            reported
+        };
+        assert!(converts(&unresolved(Some("crlf")), PLAIN));
+        assert!(converts(&unresolved(None), AUTOCRLF));
+        // Neither reading converts anything here, so the path is still cloned.
+        assert!(!converts(&unresolved(None), PLAIN));
     }
 
     #[test]

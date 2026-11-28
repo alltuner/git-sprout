@@ -268,10 +268,10 @@ fn a_text_value_git_does_not_know_does_not_stop_cloning() {
 
 /// Git passes over a `text` value it does not know and reads the deprecated `crlf`, as it
 /// does for an unspecified `text`: `text=foo -crlf` is binary, so a checkout writes it as
-/// stored even under `core.autocrlf=true`, and `text=foo crlf` is text. A git with
-/// `ls-files --format` settles the `-crlf` path by its own reading, since check-attr
-/// prints `unset` for it, so the run with a git that lacks it is the one that rests on
-/// how the attributes are read here.
+/// stored even under `core.autocrlf=true`, and `text=foo crlf` is text. Check-attr prints
+/// `unset` for the `-crlf`, and a git with `ls-files --format` settles it by its own
+/// reading. A git without it cannot tell `-crlf` from the string `crlf=unset` there, so
+/// that path is left to git and only the copies are compared.
 #[test]
 fn a_text_value_git_does_not_know_falls_back_to_crlf() {
     for old_git in [false, true] {
@@ -293,13 +293,34 @@ fn a_text_value_git_does_not_know_falls_back_to_crlf() {
         );
         made.assert_same("text.txt");
         made.assert_same("data.dat");
-        if !made.filesystem_cannot_clone() {
+        if !old_git && !made.filesystem_cannot_clone() {
             assert!(
                 made.stats["cloned"].as_u64().unwrap() > 0,
-                "the text=foo -crlf path is binary to git and should have been cloned \
-                 (old git: {old_git}): {}",
+                "the text=foo -crlf path is binary to git and should have been cloned: {}",
                 made.stats
             );
         }
+    }
+}
+
+/// Where git cannot be asked, check-attr's `unset` for `crlf` is either `-crlf` or the
+/// string `crlf=unset`, which git does not know. Behind a `text` git does not know either,
+/// git reads the string, so `text=foo crlf=unset eol=crlf` is `text eol=crlf` and
+/// `text=foo crlf=unset` is left to `core.autocrlf`: a checkout writes CRLF for both.
+#[test]
+fn an_unknown_text_beside_an_unresolved_crlf_unset_is_left_to_git() {
+    let made = worktrees(
+        "foo-crlf-unset-old-git",
+        "*.txt text=foo crlf=unset eol=crlf\n*.dat text=foo crlf=unset\n",
+        true,
+        true,
+    );
+    for path in ["text.txt", "data.dat"] {
+        assert_eq!(
+            fs::read(made.control.join(path)).unwrap(),
+            b"one\r\ntwo\r\n",
+            "the scenario needs git to convert {path}"
+        );
+        made.assert_same(path);
     }
 }
