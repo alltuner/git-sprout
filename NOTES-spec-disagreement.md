@@ -333,6 +333,29 @@ Whichever is chosen, §3.4 and `language.md`'s "Does Rust get us Windows?" secti
 rewriting, and §8's repository matrix should assert `cloned > 0` on the `core.autocrlf=true`
 fixture — which it already says to do, and which is what would have caught this.
 
+### Recovered since: text checked out with LF
+
+One case of the eol family is recovered without a filter pass. Git only rewrites line endings
+on the way out when it writes CRLF, so a text path whose checkout writes LF — `eol`
+unspecified, unset or `lf`, no `ident`, `filter` or `working-tree-encoding`,
+`core.autocrlf` unset or false, and `core.eol` unset, `lf`, or `native` where native is
+LF — is checked out as the blob's own bytes. There `smudge` is the identity and only
+`clean` may differ. That covers `* text=auto eol=lf`, the usual way a repository
+normalises to LF.
+
+The stat cache alone cannot vouch for such a path. A file written with CRLF and added under
+`text=auto` is stored as LF, keeps CRLF on disk, and is stat-clean; a checkout writes LF.
+What settles it is the size check every planned path already gets against its blob
+(`drop_resized_paths`): for these paths `clean` only ever deletes CRs (`crlf_to_git` in
+git's `convert.c`), so a file that cleans to the blob and has the blob's size is the blob.
+The `attrs-eol-lf` fixture holds three such files, one of them marked text only by the
+deprecated `crlf` attribute, and the matrix asserts the result equals `git worktree add`
+while the rest of the fixture is cloned. `core.autocrlf=input` would qualify on the same
+argument but is still left to git, as are `eol=crlf`, `ident`, filters and LFS. So is any
+`core.eol` other than unset, `lf` or `native`, compared without regard to case as git
+does: `CRLF` writes CRLF, and a value git does not define is not guessed at
+(`eol-crlf-upper`, `eol-unknown`).
+
 ## 12. §3.5.1: the construction the spec recommends does not settle case collisions
 
 ### The claim

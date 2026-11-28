@@ -44,11 +44,13 @@ The filesystem needs block cloning: **APFS** on macOS; **btrfs, XFS with reflink
 bcachefs** on Linux; **a ReFS volume or a Windows 11 Dev Drive** on Windows. Everywhere
 else, ext4 and NTFS included, it runs plain `git worktree add`.
 
-And the repository has to be one that does not convert files on checkout, because a file
-can only be shared when checking it out would not rewrite its bytes. `core.autocrlf`,
-which Git for Windows turns on by default, and `* text=auto eol=crlf` on any platform
-both leave nothing to share. Repositories with no conversion attributes clone everything,
-which is the common case on macOS and Linux, the kernel included.
+And a file can only be shared when checking it out would not rewrite its bytes.
+`core.autocrlf`, which Git for Windows turns on by default, and `* text=auto eol=crlf` on
+any platform both leave nothing to share. Repositories with no conversion attributes clone
+everything, which is the common case on macOS and Linux, the kernel included. Text
+normalised to LF, such as `* text=auto eol=lf`, is checked out as the blob's own bytes, so
+it is cloned as well; a working copy that still holds CRLF is not the size of its blob and
+is left to git.
 
 ## Measuring it yourself
 

@@ -64,6 +64,13 @@ pub fn entry_can_stand_in(target: &Blob, entry: &gix_index::Entry) -> bool {
 /// included — provided the attributes governing the path are the same on both sides.
 /// That last condition is checked separately, per subtree, by `poisoned_prefixes`.
 ///
+/// The stat cache settles a path on its own only where nothing converts in either
+/// direction. A text path checked out with LF is written as the blob's own bytes, yet a
+/// stat-clean source file there only *cleans* back to the blob: it may hold the CRLF that
+/// `git add` normalised away. Cleaning those paths only deletes CRs, so the size check
+/// every planned path gets before it is cloned (`drop_resized_paths`) is what tells the
+/// two apart.
+///
 /// # How far the stat cache is trusted
 ///
 /// Exactly as far as git trusts it, and no further:

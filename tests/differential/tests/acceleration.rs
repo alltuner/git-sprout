@@ -6,7 +6,12 @@ use differential::flags;
 use differential::run::Tool;
 
 /// Fixtures whose whole point is that cloning fires.
-const ACCELERATED: &[&str] = &["text-heavy"];
+///
+/// `attrs-eol-lf` normalises to LF with `* text=auto eol=lf`, so a checkout writes the
+/// blob's own bytes and the text in it is cloned, except the three files whose working
+/// copies still hold CRLF; the comparison with `git worktree add` below is what proves
+/// those were left to git.
+const ACCELERATED: &[&str] = &["text-heavy", "attrs-eol-lf"];
 
 /// Fixtures where cloning is expected to fire on nothing at all.
 ///
@@ -16,12 +21,19 @@ const ACCELERATED: &[&str] = &["text-heavy"];
 /// That rule turned out to be unsound: a stat-clean index entry means the working
 /// tree file *cleans back* to the blob, not that it equals what a checkout would
 /// write, and under `eol=crlf` a hand-written all-LF file is both clean and not what
-/// a checkout writes. The tool therefore clones only where no conversion applies,
-/// and a converting repository accelerates nothing. That cost was weighed and
+/// a checkout writes. The tool therefore clones only where a checkout writes the blob's
+/// own bytes, and a repository that converts on checkout accelerates nothing. The one
+/// converting case that does clone is text checked out with LF, which only converts on
+/// the way in (`attrs-eol-lf` in ACCELERATED). That cost was weighed and
 /// accepted rather than overlooked, and the documentation states it.
 ///
 /// The `autocrlf-*` fixtures spell `core.autocrlf=true` the other ways git accepts it
 /// (`yes`, `on`, `1`, `TRUE`, a key with no value), so they must clone nothing either.
+///
+/// `attrs-auto-eol-crlf` (`* text=auto eol=crlf`) checks text out with CRLF, and so do
+/// `eol-crlf-upper` (`core.eol=CRLF`, which git reads without regard to case). Under
+/// `eol-unknown`, a `core.eol` value git does not define, the path is left to git rather
+/// than guessed at.
 ///
 /// So this asserts the decision holds. If a future change starts cloning converted
 /// paths, that is a correctness regression and this test is what catches it — do not
@@ -33,6 +45,9 @@ const NOT_ACCELERATED: &[&str] = &[
     "autocrlf-one",
     "autocrlf-upper",
     "autocrlf-valueless",
+    "attrs-auto-eol-crlf",
+    "eol-crlf-upper",
+    "eol-unknown",
 ];
 
 #[test]
