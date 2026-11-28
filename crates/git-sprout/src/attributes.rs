@@ -100,8 +100,8 @@ pub fn converts(values: &HashMap<String, Value>, endings: LineEndings) -> bool {
     endings.autocrlf || endings.crlf
 }
 
-/// The path's `text` attribute, or where that is unspecified its deprecated `crlf`
-/// spelling, the way git's own conversion reads them: `crlf` means `text`, `-crlf` means
+/// The path's `text` attribute, or where that is unspecified or a value git does not
+/// know its deprecated `crlf` spelling, the way git's own conversion reads them: `crlf` means `text`, `-crlf` means
 /// `-text`, and `crlf=input` means `text eol=lf`.
 ///
 /// Git knows two string values for either, `auto` and `input`, and acts on any other as
@@ -365,6 +365,50 @@ mod tests {
             &values(&[
                 ("text", Value::Named("false".into())),
                 ("eol", Value::Named("crlf".into()))
+            ]),
+            PLAIN
+        ));
+    }
+
+    /// Git reads `crlf` whenever `text` leaves the decision open, which a value it does
+    /// not know does just as an unspecified one does: `git ls-files --eol` shows
+    /// `attr/-text` for `text=foo -crlf`, `attr/text` for `text=foo crlf` and
+    /// `attr/text eol=lf` for `text=foo crlf=input`.
+    #[test]
+    fn a_text_value_git_does_not_know_falls_back_to_crlf() {
+        for crlf in [
+            None,
+            Some(Value::Unset),
+            Some(Value::Set),
+            Some(Value::Named("input".into())),
+            Some(Value::Named("auto".into())),
+            Some(Value::Named("foo".into())),
+        ] {
+            let mut unspecified = values(&[("text", Value::Unspecified)]);
+            let mut unknown = values(&[("text", Value::Named("foo".into()))]);
+            if let Some(crlf) = &crlf {
+                unspecified.insert("crlf".into(), crlf.clone());
+                unknown.insert("crlf".into(), crlf.clone());
+            }
+            assert_eq!(
+                text_attribute(&unknown),
+                text_attribute(&unspecified),
+                "crlf={crlf:?}"
+            );
+            for endings in [PLAIN, AUTOCRLF] {
+                assert_eq!(
+                    converts(&unknown, endings),
+                    converts(&unspecified, endings),
+                    "crlf={crlf:?} {endings:?}"
+                );
+            }
+        }
+        // `-crlf` makes the path binary before `eol` is read, as `-text` would.
+        assert!(!converts(
+            &values(&[
+                ("text", Value::Named("foo".into())),
+                ("crlf", Value::Unset),
+                ("eol", Value::Named("crlf".into())),
             ]),
             PLAIN
         ));

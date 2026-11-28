@@ -265,3 +265,41 @@ fn a_text_value_git_does_not_know_does_not_stop_cloning() {
         );
     }
 }
+
+/// Git passes over a `text` value it does not know and reads the deprecated `crlf`, as it
+/// does for an unspecified `text`: `text=foo -crlf` is binary, so a checkout writes it as
+/// stored even under `core.autocrlf=true`, and `text=foo crlf` is text. A git with
+/// `ls-files --format` settles the `-crlf` path by its own reading, since check-attr
+/// prints `unset` for it, so the run with a git that lacks it is the one that rests on
+/// how the attributes are read here.
+#[test]
+fn a_text_value_git_does_not_know_falls_back_to_crlf() {
+    for old_git in [false, true] {
+        let name = if old_git {
+            "foo-crlf-old-git"
+        } else {
+            "foo-crlf"
+        };
+        let made = worktrees(
+            name,
+            "*.txt text=foo crlf\n*.dat text=foo -crlf\n",
+            true,
+            old_git,
+        );
+        assert_eq!(
+            fs::read(made.control.join("text.txt")).unwrap(),
+            b"one\r\ntwo\r\n",
+            "the scenario needs git to convert the path"
+        );
+        made.assert_same("text.txt");
+        made.assert_same("data.dat");
+        if !made.filesystem_cannot_clone() {
+            assert!(
+                made.stats["cloned"].as_u64().unwrap() > 0,
+                "the text=foo -crlf path is binary to git and should have been cloned \
+                 (old git: {old_git}): {}",
+                made.stats
+            );
+        }
+    }
+}
