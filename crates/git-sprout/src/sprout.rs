@@ -32,9 +32,19 @@ const SYMLINK_MODE: u32 = 0o120000;
 /// The most paths worth naming on one `git diff-files` command line.
 const RACY_PATH_LIMIT: usize = 1000;
 
-/// The configuration that decides how blob bytes become working-tree bytes. Cloning is
+/// The configuration that decides how blob bytes become working-tree bytes, with
+/// `core.ignoreCase` among it because it decides how attribute patterns match. Cloning is
 /// only sound when both worktrees resolve all of it the same way.
-const CONVERSION_KEYS: &[&str] = &["core.autocrlf", "core.eol", "core.symlinks"];
+///
+/// Each key comes with the `git config --type` git reads it as, so that two spellings of
+/// one value compare equal and two values one spelling hides do not: `git config --get`
+/// prints both a key with no value (true) and an empty one (false) as nothing.
+const CONVERSION_KEYS: &[(&str, &str)] = &[
+    ("core.autocrlf", "bool-or-str"),
+    ("core.eol", "bool-or-str"),
+    ("core.symlinks", "bool"),
+    ("core.ignoreCase", "bool"),
+];
 
 /// Creates the worktree, cloning what it can and letting git finish the job.
 pub fn add(command: &AddCommand, stats: &mut Stats) -> ExitCode {
@@ -358,15 +368,105 @@ fn listing(git: &Git, worktree: &Path, commit: &str) -> Option<tree::Listing> {
 
 /// Whether the two worktrees would convert blob bytes differently.
 fn conversion_mismatch(git: &Git, source: &Path, destination: &Path) -> Option<String> {
-    for key in CONVERSION_KEYS {
-        if git.config(source, key) != git.config(destination, key) {
-            return Some(format!("{key} differs between the worktrees"));
+    for (key, kind) in CONVERSION_KEYS {
+        match (
+            git.config_typed(source, kind, key),
+            git.config_typed(destination, kind, key),
+        ) {
+            (Ok(source), Ok(destination)) if source == destination => {}
+            (Ok(_), Ok(_)) => return Some(format!("{key} differs between the worktrees")),
+            _ => return Some(format!("{key} cannot be read")),
         }
+    }
+    if let Some(reason) =
+        attribute_source_mismatch(git, source, destination, &|name| std::env::var_os(name))
+    {
+        return Some(reason);
     }
     let source_attributes = worktree_attributes(git, source);
     let destination_attributes = worktree_attributes(git, destination);
     (source_attributes != destination_attributes)
         .then(|| "the worktrees have different attributes files".to_string())
+}
+
+/// Why the two worktrees might read different attributes from outside their tracked files,
+/// if they might, with the environment git inherits read through `env`.
+///
+/// Git also reads attributes from a tree it is pointed at, `GIT_ATTR_SOURCE` (which
+/// `git --attr-source` sets) or else `attr.tree` (`compute_default_attr_source` in
+/// attr.c), and from one global attributes file (`git_attr_global_file`). A tree-ish such
+/// as `HEAD` resolves in each worktree's own history, and a relative path from each
+/// worktree's own root, so the same name in both worktrees is no proof of the same rules,
+/// and either leaves the checkout to git. An absolute file is one file for both, as long as
+/// both name the same one.
+fn attribute_source_mismatch(
+    git: &Git,
+    source: &Path,
+    destination: &Path,
+    env: &dyn Fn(&str) -> Option<OsString>,
+) -> Option<String> {
+    if env("GIT_ATTR_SOURCE").is_some() {
+        return Some("GIT_ATTR_SOURCE names a tree to read attributes from".to_string());
+    }
+    for worktree in [source, destination] {
+        match git.config_is_set(worktree, "attr.tree") {
+            Ok(false) => {}
+            Ok(true) => return Some("attr.tree names a tree to read attributes from".to_string()),
+            Err(_) => return Some("attr.tree cannot be read".to_string()),
+        }
+    }
+    let (Ok(source_file), Ok(destination_file)) = (
+        global_attributes_file(git, source, env),
+        global_attributes_file(git, destination, env),
+    ) else {
+        return Some("core.attributesFile cannot be read".to_string());
+    };
+    global_attributes_mismatch(&source_file, &destination_file)
+}
+
+/// Why the worktrees, reading these global attributes files, might read different rules,
+/// if they might.
+fn global_attributes_mismatch(
+    source: &Option<OsString>,
+    destination: &Option<OsString>,
+) -> Option<String> {
+    if source != destination {
+        return Some("the worktrees read different global attributes files".to_string());
+    }
+    source
+        .as_ref()
+        .filter(|file| !Path::new(file).is_absolute())
+        .map(|_| "the global attributes file is relative to each worktree".to_string())
+}
+
+/// The global attributes file git reads in `worktree`: `core.attributesFile`, read as the
+/// path git expands (`~` under a relative `HOME` stays relative), or where it is unset
+/// the default [`default_attributes_file`] names. It is kept as git spells it. Comparing
+/// spellings errs only towards a fallback, where one file has two spellings, while a
+/// comparison of parsed paths would miss that `x` and `x/` do not open the same file.
+fn global_attributes_file(
+    git: &Git,
+    worktree: &Path,
+    env: &dyn Fn(&str) -> Option<OsString>,
+) -> io::Result<Option<OsString>> {
+    Ok(
+        match git.config_typed(worktree, "path", "core.attributesFile")? {
+            Some(file) => Some(file.into()),
+            None => default_attributes_file(env),
+        },
+    )
+}
+
+/// The attributes file git reads when `core.attributesFile` is unset:
+/// `$XDG_CONFIG_HOME/git/attributes` or, where that variable is unset or empty,
+/// `$HOME/.config/git/attributes` (`xdg_config_home_for` in path.c).
+fn default_attributes_file(env: &dyn Fn(&str) -> Option<OsString>) -> Option<OsString> {
+    let (mut file, rest) = match env("XDG_CONFIG_HOME").filter(|base| !base.is_empty()) {
+        Some(base) => (base, "/git/attributes"),
+        None => (env("HOME")?, "/.config/git/attributes"),
+    };
+    file.push(rest);
+    Some(file)
 }
 
 /// The contents of a worktree's own `info/attributes`, if it has one.
@@ -829,6 +929,215 @@ mod tests {
         assert!(line_endings(&git, &repo).expect("git answers").autocrlf);
 
         let _ = std::fs::remove_dir_all(&repo);
+    }
+
+    /// A repository with one commit, its main worktree detached, and a second worktree on
+    /// branch `topic` (not checked out) whose configuration includes the file returned
+    /// last, through `includeIf.onbranch`, which the main worktree never reads.
+    fn topic_worktree(name: &str) -> (PathBuf, PathBuf, PathBuf, PathBuf) {
+        let scratch =
+            std::env::temp_dir().join(format!("git-sprout-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&scratch);
+        let (repo, destination) = (scratch.join("repo"), scratch.join("destination"));
+        let git = Git::new(Vec::new());
+        git.capture(
+            None,
+            [OsStr::new("init"), OsStr::new("-q"), repo.as_os_str()],
+        )
+        .expect("git init");
+        std::fs::write(repo.join("a.txt"), "one\n").expect("write file");
+        for args in [
+            &["add", "--", "."][..],
+            &[
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@example.invalid",
+                "commit",
+                "-q",
+                "--no-gpg-sign",
+                "-m",
+                "base",
+            ],
+            &["checkout", "-q", "--detach"],
+            &["config", "includeIf.onbranch:topic.path", "topic-config"],
+        ] {
+            git.capture(Some(&repo), args).expect("git");
+        }
+        git.capture(
+            Some(&repo),
+            [
+                OsStr::new("worktree"),
+                OsStr::new("add"),
+                OsStr::new("-q"),
+                OsStr::new("--no-checkout"),
+                OsStr::new("-b"),
+                OsStr::new("topic"),
+                destination.as_os_str(),
+            ],
+        )
+        .expect("git worktree add");
+        let include = repo.join(".git").join("topic-config");
+        (scratch, repo, destination, include)
+    }
+
+    /// An include can give the destination settings the source never reads, such as one
+    /// `includeIf.onbranch` adds for the destination's branch alone. Git reads them when it
+    /// checks the destination out, so the source's view of the paths is then no guide to
+    /// what the checkout writes.
+    #[test]
+    fn settings_only_the_destination_reads_are_a_mismatch() {
+        let (scratch, repo, destination, include) = topic_worktree("destination-settings");
+        let git = Git::new(Vec::new());
+
+        assert_eq!(conversion_mismatch(&git, &repo, &destination), None);
+        // `core.ignoreCase` decides whether a rule such as `*.TXT -text` covers `a.txt`.
+        std::fs::write(&include, "[core]\n\tignoreCase = false\n").expect("write include");
+        let _ = git.capture(Some(&repo), ["config", "core.ignoreCase", "true"]);
+        assert_eq!(
+            conversion_mismatch(&git, &repo, &destination),
+            Some("core.ignoreCase differs between the worktrees".to_string()),
+        );
+        std::fs::write(&include, "").expect("clear include");
+
+        // Git reads a boolean however it is spelled: a key with no value is true and an
+        // empty value false, though `git config --get` prints both as nothing. The include
+        // overrides the key only if it comes after it, so the key goes in first.
+        let _ = git.capture(Some(&repo), ["config", "--unset-all", "core.ignoreCase"]);
+        let config = repo.join(".git").join("config");
+        let text = std::fs::read_to_string(&config).expect("read config");
+        let text = text.replacen("[includeIf", "[core]\n\tignoreCase\n[includeIf", 1);
+        std::fs::write(&config, text).expect("write config");
+        std::fs::write(&include, "[core]\n\tignoreCase =\n").expect("write include");
+        assert_eq!(
+            conversion_mismatch(&git, &repo, &destination),
+            Some("core.ignoreCase differs between the worktrees".to_string()),
+        );
+        // A value git cannot read as a boolean is no answer at all.
+        std::fs::write(&include, "[core]\n\tignoreCase = maybe\n").expect("write include");
+        assert_eq!(
+            conversion_mismatch(&git, &repo, &destination),
+            Some("core.ignoreCase cannot be read".to_string()),
+        );
+        std::fs::write(&include, "").expect("clear include");
+        let _ = git.capture(Some(&repo), ["config", "--unset-all", "core.ignoreCase"]);
+
+        // A global attributes file only the destination reads. `~` keeps the path free of
+        // the backslashes a Windows path would need escaped in a configuration file.
+        std::fs::write(&include, "[core]\n\tattributesFile = ~/topic.attributes\n")
+            .expect("write include");
+        assert_eq!(
+            conversion_mismatch(&git, &repo, &destination),
+            Some("the worktrees read different global attributes files".to_string()),
+        );
+        // A tree to read attributes from, which only the destination reads.
+        std::fs::write(&include, "[attr]\n\ttree = HEAD\n").expect("write include");
+        assert_eq!(
+            conversion_mismatch(&git, &repo, &destination),
+            Some("attr.tree names a tree to read attributes from".to_string()),
+        );
+        std::fs::write(&include, "").expect("clear include");
+
+        let _ = std::fs::remove_dir_all(&scratch);
+    }
+
+    /// A tree-ish such as `HEAD` resolves in each worktree's own history, so a tree to read
+    /// attributes from is a mismatch even when both worktrees name the same one, whether
+    /// `attr.tree` names it or `GIT_ATTR_SOURCE`, which `git --attr-source` also sets.
+    #[test]
+    fn a_tree_to_read_attributes_from_is_a_mismatch() {
+        let (scratch, repo, destination, _) = topic_worktree("attribute-tree");
+        let git = Git::new(Vec::new());
+        let with_attr_source = |name: &str| (name == "GIT_ATTR_SOURCE").then(|| "HEAD".into());
+        let without = |_: &str| None;
+
+        assert_eq!(
+            attribute_source_mismatch(&git, &repo, &destination, &without),
+            None
+        );
+        assert_eq!(
+            attribute_source_mismatch(&git, &repo, &destination, &with_attr_source),
+            Some("GIT_ATTR_SOURCE names a tree to read attributes from".to_string()),
+        );
+        git.capture(Some(&repo), ["config", "attr.tree", "HEAD"])
+            .expect("git config");
+        assert_eq!(
+            attribute_source_mismatch(&git, &repo, &destination, &without),
+            Some("attr.tree names a tree to read attributes from".to_string()),
+        );
+
+        let _ = std::fs::remove_dir_all(&scratch);
+    }
+
+    /// The same global attributes file in both worktrees still differs when its path is
+    /// relative: each worktree resolves it from its own root.
+    #[test]
+    fn a_relative_global_attributes_file_is_a_mismatch() {
+        let (scratch, repo, destination, _) = topic_worktree("relative-attributes");
+        let git = Git::new(Vec::new());
+        let shared = |value: &str| {
+            git.capture(Some(&repo), ["config", "core.attributesFile", value])
+                .expect("git config");
+            conversion_mismatch(&git, &repo, &destination)
+        };
+        let relative = Some("the global attributes file is relative to each worktree".to_string());
+
+        assert_eq!(shared("local.attributes"), relative);
+        assert_eq!(
+            shared(&scratch.join("shared.attributes").to_string_lossy()),
+            None
+        );
+        // `~` expands to this process's HOME, which is absolute here.
+        assert_eq!(shared("~/shared.attributes"), None);
+
+        // With the key unset, the default file comes from the environment. This is
+        // judged apart from git, whose own configuration may set the key.
+        let absolute = std::env::temp_dir().into_os_string();
+        let unset = |xdg: Option<&OsStr>, home: Option<&OsStr>| {
+            let file = default_attributes_file(&fake_env(xdg, home));
+            global_attributes_mismatch(&file, &file)
+        };
+        let rel = |path: &'static str| Some(OsStr::new(path));
+        assert_eq!(unset(None, None), None);
+        assert_eq!(unset(Some(&absolute), rel("home")), None);
+        assert_eq!(unset(rel(".config"), Some(&absolute)), relative);
+        assert_eq!(unset(None, Some(&absolute)), None);
+        assert_eq!(unset(None, rel("home")), relative);
+        assert_eq!(unset(rel(""), rel("home")), relative);
+        assert_eq!(unset(rel(""), Some(&absolute)), None);
+
+        let _ = std::fs::remove_dir_all(&scratch);
+    }
+
+    /// An environment that holds only the given `XDG_CONFIG_HOME` and `HOME`.
+    fn fake_env<'a>(
+        xdg: Option<&'a OsStr>,
+        home: Option<&'a OsStr>,
+    ) -> impl Fn(&str) -> Option<OsString> + 'a {
+        move |name| match name {
+            "XDG_CONFIG_HOME" => xdg.map(OsStr::to_os_string),
+            "HOME" => home.map(OsStr::to_os_string),
+            _ => None,
+        }
+    }
+
+    /// Git builds the default path by appending to the variable as written.
+    #[test]
+    fn the_default_attributes_file_follows_xdg_then_home() {
+        let file = |xdg: Option<&str>, home: Option<&str>| {
+            default_attributes_file(&fake_env(xdg.map(OsStr::new), home.map(OsStr::new)))
+        };
+        assert_eq!(file(None, None), None);
+        assert_eq!(file(Some("x"), Some("h")), Some("x/git/attributes".into()));
+        assert_eq!(
+            file(Some(""), Some("h")),
+            Some("h/.config/git/attributes".into())
+        );
+        assert_eq!(
+            file(None, Some("h")),
+            Some("h/.config/git/attributes".into())
+        );
+        assert_eq!(file(Some(""), None), None);
     }
 
     #[test]

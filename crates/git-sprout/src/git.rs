@@ -119,9 +119,29 @@ impl Git {
         kind: &str,
         key: &str,
     ) -> io::Result<Option<String>> {
+        self.read_config(directory, Some(kind), key)
+    }
+
+    /// Whether a configuration key is set at all for the given worktree, whatever its
+    /// value. A git that could not answer is an error, not an unset key.
+    pub fn config_is_set(&self, directory: &Path, key: &str) -> io::Result<bool> {
+        Ok(self.read_config(directory, None, key)?.is_some())
+    }
+
+    /// Runs `git config -z --get`, with `--type=<kind>` when there is a kind, and reads the
+    /// one value it prints.
+    fn read_config(
+        &self,
+        directory: &Path,
+        kind: Option<&str>,
+        key: &str,
+    ) -> io::Result<Option<String>> {
+        let kind = kind.map(|kind| format!("--type={kind}"));
         let output = self
             .command(Some(directory))
-            .args(["config", &format!("--type={kind}"), "--get", key])
+            .args(["config", "-z"])
+            .args(kind)
+            .args(["--get", key])
             .stdin(Stdio::null())
             .stderr(Stdio::null())
             .output()?;
@@ -131,9 +151,44 @@ impl Git {
             Some(0) => {
                 let text = String::from_utf8(output.stdout)
                     .map_err(|_| io::Error::other("git printed non-UTF-8"))?;
-                Ok(Some(text.trim_end_matches(['\n', '\r']).to_string()))
+                // `-z` ends the value with a NUL, so a newline of its own survives.
+                Ok(Some(text.strip_suffix('\0').unwrap_or(&text).to_string()))
             }
             _ => Err(io::Error::other("git config could not read the value")),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A value can end in a newline of its own, which a reading that trims the line git
+    /// prints would lose.
+    #[test]
+    fn a_typed_value_keeps_its_trailing_newline() {
+        let repo =
+            std::env::temp_dir().join(format!("git-sprout-config-value-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&repo);
+        let git = Git::new(Vec::new());
+        git.capture(
+            None,
+            [OsStr::new("init"), OsStr::new("-q"), repo.as_os_str()],
+        )
+        .expect("git init");
+        git.capture(Some(&repo), ["config", "core.attributesFile", "name\n"])
+            .expect("git config");
+
+        assert_eq!(
+            git.config_typed(&repo, "path", "core.attributesFile")
+                .expect("git answers"),
+            Some("name\n".to_string())
+        );
+        assert_eq!(
+            git.config_typed(&repo, "path", "core.unsetKey")
+                .expect("git answers"),
+            None
+        );
+        let _ = std::fs::remove_dir_all(&repo);
     }
 }

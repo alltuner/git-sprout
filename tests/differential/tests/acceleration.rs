@@ -22,6 +22,8 @@ const ACCELERATED: &[&str] = &["text-heavy"];
 ///
 /// The `autocrlf-*` fixtures spell `core.autocrlf=true` the other ways git accepts it
 /// (`yes`, `on`, `1`, `TRUE`, a key with no value), so they must clone nothing either.
+/// So must `attrs-relative-file`, whose relative `core.attributesFile` names a file only
+/// the source holds, leaving the source's attributes no guide to the checkout's.
 ///
 /// So this asserts the decision holds. If a future change starts cloning converted
 /// paths, that is a correctness regression and this test is what catches it — do not
@@ -33,6 +35,7 @@ const NOT_ACCELERATED: &[&str] = &[
     "autocrlf-one",
     "autocrlf-upper",
     "autocrlf-valueless",
+    "attrs-relative-file",
 ];
 
 #[test]
